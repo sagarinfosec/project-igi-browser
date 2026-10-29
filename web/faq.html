@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#070b08">
+<title>Project I.G.I. Browser FAQ & Troubleshooting</title>
+<meta name="description" content="Answers for setup, browser compatibility, black screens, loading time, storage and performance.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="site-brand" href="index.html" aria-label="Project IGI home"><span class="brand-mark" aria-hidden="true">IGI</span><span><strong>PROJECT I.G.I.</strong><small>TACTICAL ACTION · BROWSER EDITION</small></span></a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav">Menu</button>
+  <nav id="primary-nav" class="site-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="index.html#stage">Play Game</a><a href="about.html">About</a><a href="controls-guide.html">Controls</a><a href="faq.html">FAQ</a></nav>
+  <a class="header-play" href="index.html#stage">Play now <span aria-hidden="true">↗</span></a>
+</header>
+<main class="page-shell">
+
+<section class="page-hero"><p class="eyebrow">TROUBLESHOOTING</p><h1>Frequently asked <span>questions</span></h1><p class="lead">Common setup and browser issues, with practical checks to try before restarting.</p></section>
+<article class="article faq-list">
+<h2 id="setup">Setup &amp; game files</h2>
+<details open><summary>Does the website include the original game?</summary><p>No. You must provide a compatible copy you own. When asked, select the folder containing <code>igi.exe</code>, <code>MISSIONS</code> and <code>COMMON</code>. The browser imports it into local private storage.</p></details>
+<details><summary>Do I need to import the folder every time?</summary><p>Normally, the browser keeps the imported files in its origin-specific private storage, so later launches can reuse them. Clearing site data, changing the domain or using a private browsing session may remove that stored copy.</p></details>
+<h2 id="compatibility">Browser compatibility</h2>
+<details><summary>The launcher says cross-origin isolation is missing. What should I do?</summary><p>Use a deployment that sends the required COOP/COEP headers, open the site directly rather than inside an embedded frame, and use a current supported browser. Hosting configuration can prevent the game from starting even when the page itself opens.</p></details>
+<details><summary>I see a black screen or a WebGPU error.</summary><p>Update your browser, enable hardware acceleration, update graphics drivers and close/reopen the tab. Some remote desktops, virtual machines, older browsers and unsupported GPUs cannot provide a usable WebGPU adapter.</p></details>
+<details><summary>Why is the first launch slow?</summary><p>The first setup imports the game files and prepares browser storage. Mission loading can also take time. Keep the tab open and wait for the launcher status; do not repeatedly refresh during import.</p></details>
+<details><summary>The browser reloads during gameplay.</summary><p>This can happen if the device runs out of memory. Close other tabs/apps, avoid running multiple game instances, and try a desktop browser or a device with more available memory.</p></details>
+<details><summary>My mouse stopped turning the view.</summary><p>Click inside the game to recapture the pointer. If needed, press Esc to release it and then click the game again.</p></details>
+<details><summary>Does mobile gyro work on every phone?</summary><p>No. Motion permissions and sensor APIs vary by device and browser. If gyro aiming is unavailable, turn it off and use touch swipes to aim.</p></details>
+<h2>Still stuck?</h2><p>Note your device, browser version and the exact status/error text. See the <a href="controls-guide.html">controls guide</a> before trying again.</p>
+</article></main>
+<footer id="sitefoot" class="site-footer" style="margin-inline:auto">
+  <div class="footer-top"><a class="site-brand footer-brand" href="index.html"><span class="brand-mark" aria-hidden="true">IGI</span><span><strong>PROJECT I.G.I.</strong><small>BROWSER EDITION</small></span></a><nav aria-label="Footer navigation"><a href="about.html">About</a><a href="controls-guide.html">Controls</a><a href="faq.html">FAQ</a><a href="privacy.html">Privacy</a></nav></div>
+  <p class="foot-legal">Independent fan-made browser project. Project I.G.I. and related marks belong to their respective owners. No original game files are distributed here.</p>
+  <p class="copyright">© <span class="year"></span> · Built for the community.</p>
+</footer>
+<script src="site.js" defer></script>
+</body></html>

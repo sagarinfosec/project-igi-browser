@@ -815,7 +815,7 @@ async function run(session) {
   sizeCanvas();
   const script = document.createElement('script');
   script.src = 'build/recomp.js?v=12';
-  await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
+  await new Promise((ok, reject) => { script.onload = ok; script.onerror = () => reject(new Error('The game runtime is missing from this deployment. Add build/recomp.js and build/recomp12.wasm generated from your authorized game copy, then redeploy.')); document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
     print: (t) => console.log(t),
@@ -920,24 +920,6 @@ function crashCheck() {
   if (!r.bg) $('crashnote')?.classList.remove('hidden');   // a kill in the background is the OS reclaiming a hidden tab, not a crash
 }
 
-// Follow gate (index.html #iggate): the first Play shows a prompt to follow the site's Instagram; Play is
-// enabled once the Follow link has been tapped (or "already following"), and the choice is remembered in
-// this browser. A follow can't be checked from a website, so this is a prompt, not a lock. Test runs
-// (?autoplay) skip it.
-const FOLLOW_STORE = 'igi-ig-follow';
-function followGate(next) {
-  let done = false;
-  try { done = localStorage.getItem(FOLLOW_STORE) === '1' || params.has('autoplay'); } catch { done = params.has('autoplay'); }
-  const gate = $('iggate');
-  if (done || !gate) { next(); return; }
-  const play = $('ig-play');
-  const unlock = () => { try { localStorage.setItem(FOLLOW_STORE, '1'); } catch { /* storage blocked */ } gate.classList.add('hidden'); next(); };
-  $('ig-follow').onclick = () => { setTimeout(() => { play.disabled = false; play.focus(); }, 1500); };   // link opens in a new tab
-  $('ig-already').onclick = (e) => { e.preventDefault(); unlock(); };
-  play.onclick = unlock;
-  gate.classList.remove('hidden');
-}
-
 async function boot() {
   // Friendly, device-specific message when the browser can't run the game (WebGPU + cross-origin isolation
   // arrived on iPhone/iPad in iOS 26). Avoids developer jargon the tester would read as an error.
@@ -977,8 +959,8 @@ async function boot() {
     if (params.has('autoplay')) $('play').click();
   };
   migratePreset(!!(await readMarker()));   // the keyboard layout for players from before the layouts existed
-  $('play').onclick = () => followGate(() => run().catch(fail));
-  $('go-online').onclick = () => followGate(goOnline);
+  $('play').onclick = () => run().catch(fail);
+  $('go-online').onclick = goOnline;
   for (const b of document.querySelectorAll('[data-go]')) b.onclick = () => show(b.dataset.go);
   $('folder').onchange = async (e) => {
     $('pick').classList.add('hidden');

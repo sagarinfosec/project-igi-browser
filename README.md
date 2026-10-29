@@ -47,9 +47,9 @@ static x86-to-C-to-WebAssembly recompiler with a Windows API layer, to a differe
 - **Rendering fixes**: back-face culling mapped correctly for Dawn (Chrome) and wgpu-native, x87 rounding
   details in `runtime/cpu.h`, a draw-signature harness (`RC_INPUT=...:sig`) for comparing native and browser
   frames draw by draw.
-- A hosted-game flow (`web/serve.py --manifest`, `?devgame`), scripted input for headless testing
-  (`host/input.c`), and the site's own extras (visitor counter, affiliate card, and an AdSense slot that
-  works inside the cross-origin-isolated page through an `<iframe credentialless>` around `web/ad.html`).
+- A hosted-game flow (`web/serve.py --manifest`, `?devgame`) and scripted input for headless testing
+  (`host/input.c`). The website UI has been redesigned as an ad-free, responsive gaming site with About,
+  Controls, FAQ and Privacy pages. See `VERCEL_DEPLOYMENT.md` for hosting setup and required generated runtime assets.
 - **Stall detection**: a mission load presents no frames for a while; the loading cover shows meanwhile, and
   the game is only called stuck (with a reload button) once it has also opened or read no file for a minute
   (`rc_io_activity`). On a PC the pointer lock is taken back on the next key press after Esc released it, so
