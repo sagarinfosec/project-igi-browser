@@ -71,13 +71,12 @@
      the stage, 440px is reserved symmetrically (220 each side) so the panel sits in that gap and the
      stage stays centred rather than off-set. On narrow viewports the panel is hidden and the stage uses
      the full width. The .kbd-off body class (set when the player dismisses the panel) frees the space. */
-  /* Large subtitles (loader.js: the game's speech read back from its tiny font by the engine) */
-  #subcap { position: absolute; left: 50%; top: max(10px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 6;
-    width: max-content; max-width: min(72%, 900px); padding: 7px 14px; border-radius: 10px; pointer-events: none;
-    background: rgba(0, 0, 0, .62); color: #f2f2f2; font: 600 clamp(13px, 2.1vw, 19px)/1.35 ui-sans-serif, system-ui, sans-serif;
-    text-align: center; text-shadow: 0 1px 2px #000; white-space: pre-line; }
-  #subcap b { color: #7ee2a0; font-weight: 800; }
-  body.touch #subcap { top: max(64px, calc(env(safe-area-inset-top, 0px) + 56px)); }
+  /* Larger subtitles on phones (loader.js subtitles): the game's text, in its place and colour, larger */
+  #subcap { position: absolute; z-index: 2; pointer-events: none;   /* under the touch buttons (#touch: 3) */ box-sizing: border-box; padding: 2px 5px;
+    font: 600 16px/1.22 "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", sans-serif-condensed, sans-serif;
+    font-stretch: condensed; letter-spacing: .01em; color: #e8e8e8; text-align: left; }
+  #subcap.band { background: #000; }
+  #subcap.panel { background: rgba(4, 22, 6, .93); border: 1px solid rgba(70, 200, 90, .7); }
   #stage { position: relative; width: min(100%, calc((100vh - 150px - var(--adrow-h, 0px)) * 4 / 3)); aspect-ratio: 4 / 3; background: #000;
     border-radius: 12px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .55); }
   @media (min-width: 1120px) {
@@ -651,7 +650,7 @@
           <button id="home-controls" type="button" class="link-btn">Controls &amp; layout</button>
           <a href="#" id="reset" class="link-btn">Use a different game folder</a>
         </div>
-        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 01:53 IST</b> · fixes land often: reload before reporting an old issue</p>
+        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 04:59 IST</b> · fixes land often: reload before reporting an old issue</p>
       </section>
 
       <!-- multiplayer: host or join -->
@@ -805,9 +804,9 @@
   })();
 </script>
 <script src="netplay.js"></script>
-<script src="controls.js?v=9"></script>
-<script src="touch.js?v=13"></script>
-<script src="loader.js?v=38"></script>
+<script src="controls.js?v=10"></script>
+<script src="touch.js?v=14"></script>
+<script src="loader.js?v=39"></script>
 <script>
   // Ads (Adsterra; slots switched on in RC_ADS, the network's tags in ad.html). The page is cross-origin
   // isolated, which blocks third-party ad frames, so each unit loads ad.html inside an <iframe credentialless>:
@@ -834,7 +833,7 @@
     var coarse = document.body.classList.contains('coarse');
     var row = document.getElementById('adrow'), stage = document.getElementById('stage'), home = document.getElementById('view-home');
     var units = [];   // every frame made, for the teardown
-    var built = false;
+    var built = false, adsOff = false, relayout = null, clearAll = null;
     var build = function () {
       if (built) return;
       built = true;
@@ -853,14 +852,16 @@
           c.appendChild(frame(slot, w, h)); return c;
         };
         var layout = function () {
+          if (adsOff) return;
           var playing = document.body.classList.contains('playing');
           var wide = innerWidth >= 1900 && innerHeight >= 900, m = wide ? 'wide' : 'row';   // the stage keeps at least ~770px
           if (m !== mode) {
             mode = m; [promo, row, box].forEach(clear);
             document.body.classList.toggle('ads-wide', wide);
             if (A.side) promo.appendChild(unit('side', 160, 600));
-            if (wide) { if (A.lead) promo.appendChild(unit('lead', 728, 90)); if (A.box) box.appendChild(unit('box', 300, 250, true)); }
-            else if (A.lead) row.appendChild(unit('lead', 728, 90, true));
+            // while the game runs (windowed): only the units beside the game, nothing under or over it
+            if (wide) { if (A.lead && !playing) promo.appendChild(unit('lead', 728, 90)); if (A.box && !playing) box.appendChild(unit('box', 300, 250, true)); }
+            else if (A.lead && !playing) row.appendChild(unit('lead', 728, 90, true));
             promo.classList.toggle('on', !!A.side);
             row.classList.toggle('on', !wide && !!A.lead);
             box.classList.toggle('on', wide && !!A.box);
@@ -870,6 +871,8 @@
           var h = !wide && row.classList.contains('on') && !playing ? row.offsetHeight + 14 : 0;
           document.documentElement.style.setProperty('--adrow-h', h + 'px');
         };
+        relayout = function () { mode = ''; layout(); };
+        clearAll = function () { [promo, row, box].forEach(function (el) { if (el) clear(el); }); mode = ''; };
         layout(); addEventListener('resize', layout); setTimeout(layout, 300);
         new MutationObserver(layout).observe(document.body, { attributes: true, attributeFilter: ['class'] });
       }
@@ -891,8 +894,24 @@
       if (promo) promo.remove(); if (row) row.remove();
       var b = document.getElementById('adbox'); if (b) b.remove();
     };
+    // Desktop while the game runs: no ad in fullscreen (the frames are removed, so no ad code runs behind the
+    // game); back to the units beside the game in a normal window (2026-10-31: players leaving fullscreen saw the
+    // gutter empty). Phones: none once the game runs.
+    var isFs = function () { return !!(document.fullscreenElement || document.webkitFullscreenElement); };
+    var sync = function () {
+      if (!document.body.classList.contains('playing') || !relayout) return;
+      if (isFs()) { if (!adsOff) { adsOff = true; clearAll(); } }
+      else if (adsOff) { adsOff = false; relayout(); }
+    };
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
     var watch = new MutationObserver(function () {
-      if (document.body.classList.contains('playing')) { teardown(); watch.disconnect(); return; }
+      if (document.body.classList.contains('playing')) {
+        if (coarse || !built) { teardown(); watch.disconnect(); return; }
+        if (relayout && !isFs()) relayout();
+        sync();
+        return;
+      }
       if (home && !home.classList.contains('hidden')) build();
     });
     watch.observe(document.body, { attributes: true, attributeFilter: ['class'] });

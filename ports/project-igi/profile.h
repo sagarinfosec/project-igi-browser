@@ -26,7 +26,12 @@
 /* 1 while the player looks through his own eyes, 0 while the map computer is open (found the same way: snapshots
    with the map closed, open, closed again, in missions 1 and 14; it stays 1 in the Esc menu) */
 #define PROFILE_MAP_FLAG   0x00543c58u
-#define PROFILE_PAUSE_FLAG 0x005468ccu   /* 9 while the player has control; 0 in the Esc menu, in cutscenes and when dead */
+/* the game's running state, next to the level timer: 2 or more while a mission runs (it counts up while the player
+   moves), 0 in the Esc menu, on loading screens and in cutscenes. Found 2026-10-31 by snapshots across two
+   pause/resume cycles in missions 1 and 14; replaces 0x5468cc, which also drops to 0 in normal play (mission 1
+   before the first move; the last mission at times) and, the last mission's timer never running, left the page
+   thinking the game was paused: right-click fell through to the game's next weapon, look Y not inverted. */
+#define PROFILE_PAUSE_FLAG 0x00a4438cu
 /* The mission's LevelFlow task object (a pointer, set while a mission is loaded): byte +0x60 is "level
    completed", +0x61 "level failed" (the script's Complete / Failed expressions, evaluated every tick). On a
    failed level the game opens its menu by itself with Resume greyed out; the page says so (host/input.c). */

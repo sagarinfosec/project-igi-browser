@@ -40,8 +40,13 @@ const COHORT = (() => {
   if (params.get('mem') === 'full') on.compact = false;
   return { bucket: b, on, tag: Object.keys(on).filter((k) => on[k]).join('+') || 'base' };
 })();
-// one-line telemetry to crash.php (field x = the experiments this browser is in)
+// one-line telemetry to crash.php (field x = the experiments this browser is in). The per-session events (start,
+// play) come from a quarter of the browsers outside experiments and all inside: crash.php is PHP on shared hosting
+// and serves ~6 requests/s (load test 2026-10-31), which 2,000 players starting games would approach otherwise.
+// Rates per cohort are unaffected (a browser sends all of its events or none).
+const SAMPLED = COHORT.tag !== 'base' || COHORT.bucket % 4 === 0;
 const beacon = (type, extra) => {
+  if ((type === 'start' || type === 'play') && !SAMPLED) return;
   try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, ua: navigator.userAgent,
     mem: navigator.deviceMemory || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` }, extra || {}))], { type: 'application/json' })); } catch { /* no beacon */ }
 };
@@ -586,39 +591,56 @@ function setupControls() {
   renderMouse();
 }
 
-// Large subtitles: the engine reads the game's speech back from the glyphs it draws (host/subtitle.c,
-// rc_subtitle) and the page shows it in a readable caption over the top of the picture. The text is read from
-// the wasm memory directly (a NUL-terminated string); hidden after the game stops drawing it (with a short hold
-// so a flicker between two lines doesn't blink), and when the setting is off.
-function subtitles(M) {
+// Larger subtitles on phones: the engine reads the game's speech back from the glyphs it draws (host/subtitle.c:
+// rc_subtitle, and rc_subtitle_box / rc_subtitle_color for where and in which colour). The page draws the same text
+// in the same place, over the game's own lines, in the game's colour, only larger: on the black band in cutscenes,
+// in a panel like the game's in play. Only with the touch controls (on a PC the game's text is readable); the
+// setting "Large subtitles" turns it off.
+function subtitles(M, touch) {
   const box = $('subcap');
-  if (!box || !M._rc_subtitle) return;
-  let last = '', lastSeen = 0;
+  if (!box || !M._rc_subtitle || !touch) return;
+  let last = '', lastSeen = 0, lastBox = '';
   const dec = new TextDecoder('latin1');
+  const canvas = $('canvas'), stage = $('stage');
   setInterval(() => {
-    let text = '';
+    let text = '', b = null, col = 0;
     try {
       if (RcControls.get().subs) {
         const p = M._rc_subtitle(), mem = new Uint8Array(M.wasmMemory.buffer, p, 512);
         const end = mem.indexOf(0);
         text = dec.decode(mem.slice(0, end < 0 ? 512 : end));
+        if (text && M._rc_subtitle_box) { b = Array.from(new Float32Array(M.wasmMemory.buffer, M._rc_subtitle_box(), 5)); col = M._rc_subtitle_color() >>> 0; }
       }
     } catch { text = ''; }
     const now = performance.now();
     if (text) lastSeen = now;
-    if (text && text !== last) {
-      last = text;
-      box.textContent = '';
-      for (const line of text.split('\n')) {
-        const m = /^([A-Z][A-Z .]{0,22}):\s*(.*)$/.exec(line);
-        const p = document.createElement('div');
-        if (m) { const b = document.createElement('b'); b.textContent = m[1] + ': '; p.appendChild(b); p.appendChild(document.createTextNode(m[2])); }
-        else p.textContent = line;
-        box.appendChild(p);
-      }
-      box.classList.remove('hidden');
-    } else if (!text && last && now - lastSeen > 700) { last = ''; box.classList.add('hidden'); }
-  }, 150);
+    if (!text) { if (last && now - lastSeen > 500) { last = ''; box.classList.add('hidden'); } return; }
+    // the game's 640x480-style screen is a 4:3 box centred in the canvas (letterboxed, or the HUD box in wide mode)
+    const r = canvas.getBoundingClientRect(), S = stage.getBoundingClientRect();
+    const h = Math.min(r.height, (r.width * 3) / 4), w = (h * 4) / 3;
+    const ox = r.left - S.left + (r.width - w) / 2, oy = r.top - S.top + (r.height - h) / 2;
+    const geo = b ? b.map((v) => v.toFixed(3)).join() + '|' + Math.round(w) : '';
+    if (text === last && geo === lastBox) return;
+    last = text; lastBox = geo;
+    const rgb = [(col >> 16) & 255, (col >> 8) & 255, col & 255];
+    const green = rgb[1] > 120 && rgb[1] > rgb[0] * 1.4;   // in play the game writes in green in a green panel
+    box.className = green ? 'panel' : 'band';
+    box.style.color = col ? `rgb(${rgb.join()})` : '';
+    const fs = Math.max(14, Math.min(22, h * 0.04));        // about twice the game's size on a phone
+    box.style.fontSize = `${fs}px`;
+    let x0 = ox + w * 0.05, y0 = oy + h * 0.85, width = w * 0.9, room = h * 0.15;
+    if (b && b[2] > b[0]) {
+      x0 = Math.max(ox, ox + b[0] * w - 4); y0 = Math.max(oy, oy + b[1] * h - 3);
+      width = Math.min(w - (x0 - ox) - 2, Math.max((b[2] - b[0]) * w + 8, w * 0.5));
+      // the room the game's own block leaves: to the bottom of the picture on the cutscene band, else twice its height
+      room = green ? Math.max((b[3] - b[1]) * h * 2.2, h * 0.16) : oy + h - y0;
+    }
+    box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${width}px`; box.style.transform = 'none';
+    box.textContent = text.replace(/\n/g, ' ');
+    // as large as fits that room (about twice the game's size when it fits), never below 14 px (then it grows upwards)
+    for (let f = fs; f >= 14; f -= 1) { box.style.fontSize = `${f}px`; if (box.scrollHeight <= room + 1) break; }
+    if (box.scrollHeight > room + 1 && !green) box.style.top = `${Math.max(oy, oy + h - box.scrollHeight)}px`;   // still too tall: grow upwards
+  }, 120);
 }
 
 function hookInput(M, net) {
@@ -816,25 +838,68 @@ function compactMemory() {
   return want === 'compact' || (want !== 'full' && (isWebKit() || COHORT.on.compact));
 }
 
-// The browser dropped the WebGPU device (its GPU process died, or the page was pushed out of memory): the
-// game can't draw any more (render_wgpu.c calls this). Say so instead of leaving a frozen picture.
-window.rcDeviceLost = (msg) => {
-  if ($('gpulost')) return;
-  try {   // telemetry (crash.php): how often the browser drops the device, and why
-    navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 21, x: COHORT.tag, type: 'gpulost', msg: String(msg || '').slice(0, 200), ua: navigator.userAgent,
-      mem: navigator.deviceMemory || 0, mission: RcControls.inMission() ? 1 : 0, bg: document.hidden ? 1 : 0 })], { type: 'application/json' }));
+// The browser dropped the WebGPU device: its GPU process died or restarted (Android Chrome does it when a system
+// dialog or another app covers the browser), or the page was pushed out of GPU memory. The renderer rebuilds itself
+// on a new device (render_wgpu.c rc_gpu_recover) and the game carries on where it was; this shows a short note
+// meanwhile. Only if no new device comes (rcRecoverFailed, or nothing within 20 s while the page is visible) the
+// old prompt to reload appears.
+let gpuLostAt = 0, gpuFailTimer = 0;
+const gpuBeacon = (type, extra) => {
+  try {
+    navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, x: COHORT.tag, type, ua: navigator.userAgent,
+      mem: navigator.deviceMemory || 0, mission: RcControls.inMission() ? 1 : 0, bg: document.hidden ? 1 : 0 }, extra))], { type: 'application/json' }));
   } catch { /* no beacon */ }
+};
+function gpuReloadPrompt(msg) {
+  if ($('gpulost')) return;
+  $('gpurestore')?.remove();
   const d = document.createElement('div');
   d.id = 'gpulost';
   d.style.cssText = 'position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(0,0,0,.92);color:#fff;' +
     'font:16px/1.5 ui-sans-serif,system-ui,sans-serif;text-align:center;padding:24px';
   d.innerHTML = '<div><p style="font-size:20px;margin:0 0 8px">The graphics device was lost</p>' +
-    '<p style="opacity:.8;margin:0 0 18px">The browser stopped the game\'s renderer' + (msg ? ' (' + msg.replace(/[<>&]/g, '') + ')' : '') +
-    '. Your progress since the last save is lost.</p>' +
+    '<p style="opacity:.8;margin:0 0 18px">The browser stopped the game\'s renderer' + (msg ? ' (' + String(msg).replace(/[<>&]/g, '') + ')' : '') +
+    ' and could not start it again. Your progress since the last save is lost. If this happens again, close the browser completely' +
+    ' (on a phone, swipe it away from the recent apps) and open the site again: after repeated graphics crashes the browser turns' +
+    ' graphics off for the site until it restarts.</p>' +
     '<button id="gpulost-reload" style="font:inherit;padding:10px 22px;border-radius:8px;border:0;background:#45cf79;color:#000;font-weight:700">Reload the game</button></div>';
   document.body.appendChild(d);
   $('gpulost-reload').onclick = () => location.reload();
+}
+window.rcDeviceLost = (msg) => {
+  gpuLostAt = performance.now();
+  gpuBeacon('gpulost', { msg: String(msg || '').slice(0, 200) });
+  if (!$('gpurestore')) {
+    const n = document.createElement('div');
+    n.id = 'gpurestore';
+    n.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:50;padding:12px 20px;border-radius:10px;' +
+      'background:rgba(0,0,0,.8);color:#fff;font:600 15px/1.4 ui-sans-serif,system-ui,sans-serif;pointer-events:none';
+    n.textContent = 'Restoring graphics…';
+    ($('stage') || document.body).appendChild(n);
+  }
+  clearTimeout(gpuFailTimer);
+  const check = () => {   // counts only visible time: in the background Chrome may not give a device until it is back
+    if (!gpuLostAt) return;
+    if (document.hidden) { gpuFailTimer = setTimeout(check, 1000); return; }
+    if (performance.now() - gpuLostAt > 20000) { gpuBeacon('gpufail', {}); gpuReloadPrompt(msg); return; }
+    gpuFailTimer = setTimeout(check, 1000);
+  };
+  gpuFailTimer = setTimeout(check, 1000);
 };
+window.rcDeviceRestored = (n) => {
+  const ms = gpuLostAt ? Math.round(performance.now() - gpuLostAt) : 0;
+  gpuLostAt = 0; clearTimeout(gpuFailTimer);
+  $('gpurestore')?.remove();
+  gpuBeacon('gpurestored', { dur: ms, n });
+};
+window.rcRecoverFailed = () => {
+  // retry when the page is visible again (Chrome gives no device to a page in the background), else give up
+  if (document.hidden) return;
+  setTimeout(() => { if (gpuLostAt && window.recomp && window.recomp._rc_gpu_recover) window.recomp._rc_gpu_recover(); }, 1500);
+};
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && gpuLostAt && window.recomp && window.recomp._rc_gpu_recover) { gpuLostAt = performance.now(); window.recomp._rc_gpu_recover(); }
+});
 
 function sizeCanvas() {
   const canvas = $('canvas');
@@ -914,7 +979,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=21';
+  script.src = 'build/recomp.js?v=22';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -953,7 +1018,7 @@ async function run(session) {
   M._rc_gpu_init(canvas.width, canvas.height);
   new ResizeObserver(() => { sizeCanvas(); M._rc_set_canvas_size(canvas.width, canvas.height); }).observe(canvas);
   hookInput(M, !!session);
-  subtitles(M);
+  subtitles(M, touch);
   if (touch) { RcTouch.attach(M, $('stage'), canvas); followVisualViewport($('stage')); }
   if (session) { session.client.attach(M); showNetStatus(M, session); }
   crashWatch(M, touch);
@@ -1427,7 +1492,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp21.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp22.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

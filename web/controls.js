@@ -150,11 +150,16 @@ const RcControls = (() => {
   // binoculars instead (the game toggles them on each press of their key) and zooms through those; the next
   // tap zooms back out and puts them away. A player who raised the scope or the binoculars themselves gets
   // the same taps.
-  let viaBino = false, viaScope = false, wait = 0;
+  let viaBino = false, viaScope = false, wait = 0, zoomPress = 0, zoomFrom = 1, lastToggle = 0;
   const later = (ms, f) => { wait = setTimeout(() => { wait = 0; f(); }, ms); };
   function scopeToggle() {
     if (!inMission()) return;
-    if (wait) { clearTimeout(wait); wait = 0; return; }   // a tap while the last one is still settling
+    // a second tap while the first is still bringing the scope up: ignored (it used to cancel it, which read as a
+    // missed touch to players who tap twice because nothing showed yet)
+    const now = performance.now();
+    if (wait && now - lastToggle < 600) return;
+    if (wait) { clearTimeout(wait); wait = 0; }
+    lastToggle = now;
     if (drive) { driveStop(); return; }   // a tap while it's still zooming: stop where it is
     if (scoped()) {
       if (viaScope) { viaScope = false; tap(ACTIONS.altfire); return; }
@@ -193,8 +198,19 @@ const RcControls = (() => {
     const a = ACTIONS[name];
     if (!a) return;
     if (a.scope) { if (down) scopeToggle(); return; }
+    // Zoom in / out. The game's zoom keys only work with the scope or binoculars up, and zoom while held: a quick
+    // tap moved the view a barely visible amount and + without a scope did nothing, both felt like a missed touch
+    // (2026-10-31). Now + without a scope raises it (the scope toggle), a tap steps the zoom 1.6x, a hold zooms on.
     if (name === 'zoomin' || name === 'zoomout') {
-      if (down) { driveStop(); zoomKeyDown(name === 'zoomin' ? 1 : -1); } else zoomKeyUp(name === 'zoomin' ? 1 : -1);
+      const dir = name === 'zoomin' ? 1 : -1;
+      if (down) {
+        if (!scoped()) { zoomPress = 0; if (dir > 0) scopeToggle(); return; }
+        driveStop(); zoomPress = performance.now(); zoomFrom = zoom(); zoomKeyDown(dir);
+      } else if (zoomPress) {
+        const held = performance.now() - zoomPress; zoomPress = 0;
+        if (held < 220 && Math.abs(zoom() - zoomFrom) < 0.25 * zoomFrom) zoomTo(dir > 0 ? zoomFrom * 1.6 : Math.max(1.05, zoomFrom / 1.6), null, 500);
+        else zoomKeyUp(dir);
+      }
       return;
     }
     if (down && (name === 'nextweapon' || name === 'prevweapon')) weaponChanged();

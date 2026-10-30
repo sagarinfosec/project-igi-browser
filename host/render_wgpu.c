@@ -765,8 +765,9 @@ static GSurf *gsurf(uint32_t id, uint32_t w, uint32_t h, int depth) {
 }
 
 /* depth buffer for targets whose depth surface doesn't match their size (WebGPU needs equal sizes) */
+static struct { uint32_t w, h; WGPUTexture t; WGPUTextureView v; } g_scratch[8];
 static WGPUTextureView scratch_depth(uint32_t w, uint32_t h) {
-    static struct { uint32_t w, h; WGPUTexture t; WGPUTextureView v; } cache[8];
+#define cache g_scratch
     for (int i = 0; i < 8; i++) if (cache[i].t && cache[i].w == w && cache[i].h == h) return cache[i].v;
     for (int i = 0; i < 8; i++)
         if (!cache[i].t) {
@@ -780,6 +781,7 @@ static WGPUTextureView scratch_depth(uint32_t w, uint32_t h) {
             return cache[i].v;
         }
     return cache[0].v;
+#undef cache
 }
 
 static void exec_target(const CmdTarget *c) {
@@ -1205,6 +1207,8 @@ typedef struct Chunk { uint8_t *buf; size_t len, off; int ends_frame; struct Chu
 static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
 static Chunk *g_q_head, *g_q_tail;
 static int g_q_frames, g_ready;
+static volatile int g_lost, g_recovering, g_lost_count;   /* device-lost recovery (on_web_device_lost) */
+EMSCRIPTEN_KEEPALIVE int rc_gpu_recover(void);
 static WGPUBuffer g_rb_buf;
 static CmdReadback g_rb_cmd;
 static uint32_t g_rb_gw, g_rb_gh, g_rb_stride;
@@ -1272,6 +1276,7 @@ static int run_chunk(Chunk *ch) {
    allow_present is set - the page passes 1 from requestAnimationFrame. Returns frames presented. */
 EMSCRIPTEN_KEEPALIVE int rc_gpu_pump(int allow_present) {
     int presented = 0;
+    if (g_lost && !g_recovering && !g_rb_pending) { rc_gpu_recover(); return 0; }
     if (!g_ready) return 0;
     g_watch.page_phase = 1;
     while (!g_rb_pending) {
@@ -1304,22 +1309,100 @@ EMSCRIPTEN_KEEPALIVE void rc_set_wide(int on) { g_wide = on ? 1 : 0; }
 
 static void on_web_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView msg, void *u1, void *u2) {
     (void)u1; (void)u2;
-    if (st != WGPURequestDeviceStatus_Success) { fprintf(stderr, "[wgpu] device: %.*s\n", (int)msg.length, msg.data); return; }
+    if (st != WGPURequestDeviceStatus_Success) {
+        fprintf(stderr, "[wgpu] device: %.*s\n", (int)msg.length, msg.data);
+        if (g_lost) { g_recovering = 0; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(); }); }
+        return;
+    }
     g_dev = d;
     g_queue = wgpuDeviceGetQueue(g_dev);
     create_resources();
+    if (g_lost) {
+        extern volatile uint32_t g_gpu_gen;
+        __atomic_add_fetch(&g_gpu_gen, 1, __ATOMIC_ACQ_REL);   /* the game sends its textures again */
+        g_lost = 0; g_recovering = 0; g_lost_count++;
+        fprintf(stderr, "[wgpu] device restored (%d)\n", g_lost_count);
+        EM_ASM({ if (typeof rcDeviceRestored === 'function') rcDeviceRestored($0); }, g_lost_count);
+    }
     __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
 }
 
-/* The browser dropped the device (its GPU process died, or the page was pushed out of memory): nothing can
-   be rendered any more. The page shows a reload prompt (loader.js: rcDeviceLost). */
+/* The browser dropped the device: its GPU process died or restarted (Android Chrome does it when a system dialog
+   or another app covers the browser), or the page was pushed out of GPU memory. Until 2026-10-31 that ended the
+   game with a reload prompt, ~5-10% of sessions. Now the renderer gets a new adapter and device and rebuilds
+   itself; every texture is sent again from the game's memory (render_rec.c g_gpu_gen). The game waits meanwhile
+   (the frame queue stops draining). The page shows "restoring" (rcDeviceLost) and the reload prompt only if
+   recovery fails (rcRecoverFailed). The work happens in rc_gpu_pump, never inside a WebGPU callback. */
 static void on_web_device_lost(WGPUDevice const *d, WGPUDeviceLostReason reason, WGPUStringView msg, void *u1, void *u2) {
     (void)d; (void)u1; (void)u2;
     if (reason == WGPUDeviceLostReason_Destroyed) return;
     fprintf(stderr, "[wgpu] device lost (%d): %.*s\n", (int)reason, (int)msg.length, msg.data);
     char text[256];
     snprintf(text, sizeof text, "%.*s", (int)(msg.length < 200 ? msg.length : 200), msg.data);
+    g_lost = 1;
+    __atomic_store_n(&g_ready, 0, __ATOMIC_RELEASE);
     EM_ASM({ if (typeof rcDeviceLost === 'function') rcDeviceLost(UTF8ToString($0)); }, text);
+}
+static void forget_ps(Shader *sh) {
+    if (!sh->pixel || !sh->backend) return;
+    if (sh->backend != (void *)1) { PsProgram *p = sh->backend; wgpuShaderModuleRelease(p->module); free(p); }
+    sh->backend = NULL;
+}
+/* drops every object of the lost device (they are all invalid); the next device starts from nothing */
+static void drop_device_objects(void) {
+    if (g_pass) { wgpuRenderPassEncoderRelease(g_pass); g_pass = NULL; }
+    if (g_enc) { wgpuCommandEncoderRelease(g_enc); g_enc = NULL; }
+    g_frame_open = 0;
+    for (uint32_t k = 0; k < OBJ_CAP; k++) {
+        if (g_objs[k].id && g_objs[k].id != 0xFFFFFFFFu && g_objs[k].p) {
+            GTex *g = g_objs[k].p;   /* GTex and GSurf both start with the texture and its view */
+            if (g->view) wgpuTextureViewRelease(g->view);
+            if (g->tex) wgpuTextureRelease(g->tex);
+            free(g_objs[k].p);
+        }
+        g_objs[k].id = 0; g_objs[k].p = NULL;
+    }
+    g_gpu_tex_bytes = 0;
+    for (size_t i = 0; i < g_nretired; i++) wgpuTextureRelease(g_retired[i]);
+    g_nretired = 0;
+    for (size_t i = 0; i < sizeof g_pipes / sizeof g_pipes[0]; i++) if (g_pipes[i].p) wgpuRenderPipelineRelease(g_pipes[i].p);
+    memset(g_pipes, 0, sizeof g_pipes);
+    for (size_t i = 0; i < BG_CACHE; i++) if (g_bgc[i].bg) wgpuBindGroupRelease(g_bgc[i].bg);
+    memset(g_bgc, 0, sizeof g_bgc);
+    for (size_t i = 0; i < 1024; i++) if (g_samplers[i]) { wgpuSamplerRelease(g_samplers[i]); g_samplers[i] = NULL; }
+    for (int i = 0; i < 8; i++) if (g_scratch[i].t) { wgpuTextureViewRelease(g_scratch[i].v); wgpuTextureRelease(g_scratch[i].t); }
+    memset(g_scratch, 0, sizeof g_scratch);
+    shader_each(forget_ps);
+    if (g_white.view) { wgpuTextureViewRelease(g_white.view); wgpuTextureRelease(g_white.tex); }
+    if (g_black.view) { wgpuTextureViewRelease(g_black.view); wgpuTextureRelease(g_black.tex); }
+    memset(&g_white, 0, sizeof g_white); memset(&g_black, 0, sizeof g_black);
+    if (g_bb_view) { wgpuTextureViewRelease(g_bb_view); wgpuTextureRelease(g_bb); g_bb_view = NULL; g_bb = NULL; }
+    if (g_depth_view) { wgpuTextureViewRelease(g_depth_view); wgpuTextureRelease(g_depth); g_depth_view = NULL; g_depth = NULL; }
+    if (g_bg_u) { wgpuBindGroupRelease(g_bg_u); g_bg_u = NULL; }
+    if (g_vbuf) { wgpuBufferRelease(g_vbuf); g_vbuf = NULL; }
+    if (g_ubuf) { wgpuBufferRelease(g_ubuf); g_ubuf = NULL; }
+    if (g_pl) { wgpuPipelineLayoutRelease(g_pl); g_pl = NULL; }
+    if (g_bgl_u) { wgpuBindGroupLayoutRelease(g_bgl_u); g_bgl_u = NULL; }
+    if (g_bgl_t) { wgpuBindGroupLayoutRelease(g_bgl_t); g_bgl_t = NULL; }
+    if (g_shader) { wgpuShaderModuleRelease(g_shader); g_shader = NULL; }
+    if (g_coalesce) { free(g_vstage); free(g_ustage); g_vstage = g_ustage = NULL; }
+    g_vpos = g_upos = 0;
+    g_tgt_color = g_tgt_depth = NULL; g_tgt_gs = NULL;
+    g_win_w = g_win_h = 0;   /* reconfigure the canvas */
+    if (g_queue) { wgpuQueueRelease(g_queue); g_queue = NULL; }
+    if (g_dev) { wgpuDeviceRelease(g_dev); g_dev = NULL; }
+    if (g_adapter) { wgpuAdapterRelease(g_adapter); g_adapter = NULL; }
+}
+static void request_web_adapter(int attempt);
+/* page: try (again) to get a device after a loss; returns 1 while a recovery is under way or done */
+EMSCRIPTEN_KEEPALIVE int rc_gpu_recover(void) {
+    if (!g_lost) return 1;
+    if (g_recovering) return 1;
+    g_recovering = 1;
+    if (g_dev) drop_device_objects();
+    fprintf(stderr, "[wgpu] recovering: requesting a new device\n");
+    request_web_adapter(0);
+    return 1;
 }
 
 static void request_web_adapter(int attempt);
@@ -1330,6 +1413,7 @@ static void on_web_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPUStrin
     if (st != WGPURequestAdapterStatus_Success) {
         fprintf(stderr, "[wgpu] adapter (attempt %d): %.*s\n", attempt, (int)msg.length, msg.data);
         if (attempt < 3) request_web_adapter(attempt + 1);   /* default preference, compatibility mode, then the software fallback */
+        else if (g_lost) { g_recovering = 0; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(); }); }
         return;
     }
     if (attempt == 2) { g_compat = 1; fprintf(stderr, "[wgpu] using a WebGPU compatibility-mode adapter (OpenGL ES class)\n"); }

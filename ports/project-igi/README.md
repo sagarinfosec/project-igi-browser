@@ -108,7 +108,22 @@ from gaps, keeps the lines that start with a speaker ("ANYA: ") and the lines th
 text (`rc_subtitle`); the page shows it in a caption (`#subcap`, setting "Large subtitles", on by default).
 `RC_SUB_LOG=1` prints each new subtitle natively. A new font or language needs the harvest and solve again.
 
-Testing switches: `RC_MEMSNAP=frame:addr:len:path`, `RC_POKE=frame:addr:hexbytes`, `RC_DUMP=frame:addr:len`
+Pause detection, third version (2026-10-31): 0x5468cc also dropped to 0 in normal play (mission 1 before the
+first move, the last mission at times), and the last mission's timer never runs, so the page thought the game
+paused: right-click fell through to the game's next weapon, swipes lost their inversion and smoothing.
+`PROFILE_PAUSE_FLAG` is now 0xa4438c, next to the level timer: 0 in the Esc menu, loading screens and cutscenes,
+2 or more in play (it counts up while the player moves). Found with snapshots across two pause/resume cycles in
+missions 1 and 14, verified through the intro, the map, Esc twice and 3000 frames of walking.
+
+Subtitle placement: `rc_subtitle_box` (left, top, right, bottom, line pitch as fractions of the game screen) and
+`rc_subtitle_color`; the page draws the larger text over the game's own lines, phones only.
+
+Device-lost recovery (render_wgpu.c): on a lost WebGPU device (Android Chrome restarts its GPU process when a system
+dialog covers the browser; ~5-10% of sessions ended there) the next `rc_gpu_pump` drops every object of the old
+device, requests a new adapter and device, rebuilds, and bumps `g_gpu_gen` (render_rec.c) so every texture is sent
+again from guest memory. Tested with DevTools `Browser.crashGpuProcess`: restored in 0.2 s, textures intact.
+
+Testing switches: `RC_WATCH=frame:hexaddr` (native write watchpoint from that frame), `RC_MEMSNAP=frame:addr:len:path`, `RC_POKE=frame:addr:hexbytes`, `RC_DUMP=frame:addr:len`
 (an address may be a pointer chain, `base>off>off`: each `>off` loads the dword so far and adds off, resolved
 at that frame — for objects on the heap), `RC_ZOOM_LOG=1`
 (the projection's zoom whenever it changes), `RC_PROJ_LOG=frame`, `RC_WINDOW=WxH` and `RC_WIDE=1` (native

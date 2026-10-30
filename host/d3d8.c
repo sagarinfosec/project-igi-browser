@@ -618,6 +618,8 @@ W(dev_ProcessVertices) { RET(6, S_OK); }
 /* Shaders */
 #define MAX_SHADERS 4096
 static Shader *g_shaders[MAX_SHADERS];
+/* every live shader (the renderer drops its per-device copies when the GPU device is replaced) */
+void shader_each(void (*f)(Shader *)) { for (uint32_t i = 0; i < MAX_SHADERS; i++) if (g_shaders[i]) f(g_shaders[i]); }
 Shader *shader_get(uint32_t h) {
     uint32_t i = (h - 0x10001u) / 2;
     return (h & 1) && h >= 0x10001u && i < MAX_SHADERS ? g_shaders[i] : NULL;

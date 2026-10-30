@@ -391,8 +391,13 @@ static void apply_color_key(const Texture *t, uint32_t l, uint8_t *rgba) {
     }
 }
 
+/* Bumped by the renderer after it replaced a lost GPU device (render_wgpu.c): every texture is sent again on its
+   next use, from the copy the game keeps in its own memory. */
+volatile uint32_t g_gpu_gen;
 static void sync_texture(Device *d, Texture *t) {
-    if (t->sent_version == t->version) return;
+    uint32_t gen = __atomic_load_n(&g_gpu_gen, __ATOMIC_ACQUIRE);
+    if (t->sent_version == t->version && t->sent_gen == gen) return;
+    t->sent_gen = gen;
     uint32_t fmt = bc_format(t), bs = fmt == TEXFMT_BC1 ? 8 : 16;
     size_t total = 0;
     for (uint32_t l = 0; l < t->levels && l < 14; l++)
@@ -686,10 +691,10 @@ static void rec_draw_impl(Device *d, uint32_t prim, uint32_t prim_count, uint32_
         for (uint32_t i = 0; i < n; i++) { x0 = fminf(x0, cv[i].x); y0 = fminf(y0, cv[i].y); x1 = fmaxf(x1, cv[i].x); y1 = fmaxf(y1, cv[i].y); }
         float frac = fminf(1.f, fmaxf(0.f, fminf(x1, lw) - fmaxf(x0, 0.f)) * fmaxf(0.f, fminf(y1, lh) - fmaxf(y0, 0.f)) / (lw * lh));
         if (n == 6 && y1 - y0 < 24.f) {   /* small quads may be subtitle glyphs (host/subtitle.c) */
-            extern void subtitle_glyph(float, float, float, float, float, float, float, float);
+            extern void subtitle_glyph(float, float, float, float, float, float, float, float, uint32_t, float);
             float gu0 = 1e9f, gv0 = 1e9f, gu1 = -1e9f, gv1 = -1e9f;
             for (uint32_t i = 0; i < n; i++) { gu0 = fminf(gu0, cv[i].tc[0][0]); gv0 = fminf(gv0, cv[i].tc[0][1]); gu1 = fmaxf(gu1, cv[i].tc[0][0]); gv1 = fmaxf(gv1, cv[i].tc[0][1]); }
-            subtitle_glyph(x0, y0, x1, y1, gu0, gv0, gu1, gv1);
+            subtitle_glyph(x0 / lh, y0 / lh, x1 / lh, y1 / lh, gu0, gv0, gu1, gv1, cv[0].diffuse, lw / lh);
         }
         if (frac < 0.9f) g_rec_cover += frac;   /* one quad over the whole screen is a fade, drawn over the wide picture as it is */
         if (d->frame == g_cmd_sig_frame) fprintf(stderr, "[cover] d%u n=%u box %g,%g-%g,%g frac %.3f total %.3f\n", g_f_drawn - 1, n, x0, y0, x1, y1, frac, g_rec_cover);
@@ -741,6 +746,7 @@ static void rec_present_impl(Device *d) {
         g_frame_wide = g_wide && g_world_this_frame && !overlay && factor > 1.01f;
         rc_aspect_x = g_frame_wide ? factor : 1.f;
     }
+    { static unsigned nw; if (!g_world_this_frame) nw++; if (getenv("RC_TICK_LOG") && d->frame % 60 == 0) { fprintf(stderr, "[noworld] frame %u: %u of 60\n", d->frame, nw); } if (d->frame % 60 == 0) nw = 0; }
     g_in_mission = g_world_this_frame;   /* latch for this frame's input; reset for the next */
     g_world_this_frame = 0;
 #ifdef PROFILE_TICK
@@ -751,16 +757,14 @@ static void rec_present_impl(Device *d) {
       g_map = g_in_mission && R32(PROFILE_MAP_FLAG) == 0;
 #endif
 #ifdef PROFILE_PAUSE_FLAG
-      /* The game's own control flag (0 in the Esc menu, in cutscenes, when dead) together with the level timer
-         standing still: the timer alone never runs in the last mission (always "paused"), the flag alone can stay 0
-         after a resume. Both say paused: paused. */
-      g_paused = g_in_mission && R32(PROFILE_PAUSE_FLAG) == 0 && g_tick_still >= 3;
+      /* the game's running state (profile.h): 0 in the Esc menu and cutscenes, never in play */
+      g_paused = g_in_mission && R32(PROFILE_PAUSE_FLAG) == 0;
 #else
       g_paused = g_in_mission && g_tick_still >= 3;
 #endif
       { static int logit = -1; if (logit < 0) logit = getenv("RC_TICK_LOG") != NULL;   /* RC_TICK_LOG=1: the pause detector's inputs */
         if (logit && d->frame % 60 == 0) fprintf(stderr, "[tick] frame %u tick %u still %d world %d paused %d cand %x %x %x\n", d->frame, t, g_tick_still, g_in_mission, g_paused,
-                                                     R32(0x5468ccu), g_map, 0); } }
+                                                     R32(0xa44390u), R32(0xa4438cu), g_map); } }
 #endif
     if (getenv("RC_ZOOM_LOG") && g_zoom_this_frame != g_zoom) fprintf(stderr, "[zoom] frame %u: m11 %.5f\n", d->frame, g_zoom_this_frame);
     g_zoom = g_zoom_this_frame;

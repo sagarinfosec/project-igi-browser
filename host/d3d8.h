@@ -27,6 +27,7 @@ typedef struct Texture {
     uint32_t version;             /* bumped on every unlock: backends re-upload when it changes */
     uint32_t gpu_id;              /* renderer's name for it (stable, never reused) */
     uint32_t sent_version;        /* version last sent to the renderer */
+    uint32_t sent_gen;            /* the renderer's device generation it was sent to (render_rec.c g_gpu_gen) */
     int has_ck;                   /* DirectDraw source color key: matching texels get alpha 0 */
     uint32_t ck_lo, ck_hi;
     void *backend;
@@ -88,6 +89,7 @@ typedef struct Device {
 } Device;
 
 Shader *shader_get(uint32_t handle);
+void shader_each(void (*f)(Shader *));
 uint32_t gpu_new_id(void);
 uint32_t format_bpp(uint32_t fmt);   /* bits per pixel; DXT1 = 4, DXT2-5 = 8 */
 int format_is_dxt(uint32_t fmt);
