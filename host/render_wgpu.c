@@ -229,6 +229,7 @@ static void on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m
 static void on_error(WGPUDevice const *d, WGPUErrorType t, WGPUStringView msg, void *u1, void *u2) {
     (void)d; (void)u1; (void)u2;
     static int count;
+    g_watch.gpu_errors++;   /* a rejected command means frames that stay black: counted for the field reports */
     if (count++ < 20) fprintf(stderr, "[wgpu] error %d: %.*s\n", (int)t, (int)msg.length, msg.data);
 }
 

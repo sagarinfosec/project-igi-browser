@@ -851,7 +851,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=16';
+  script.src = 'build/recomp.js?v=17';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -944,14 +944,14 @@ function crashWatch(M, touch) {
   let lastFrames = -1, fps = 0, pageMB = 0, longTask = 0;
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) if (e.duration > longTask) longTask = e.duration; }).observe({ type: 'longtask', buffered: true }); } catch { /* no longtask support */ }
   const counters = () => {
-    try { return M && M._rc_watch_addr ? Array.from(new Int32Array(M.wasmMemory.buffer, M._rc_watch_addr(), 7)) : []; } catch { return []; }
+    try { return M && M._rc_watch_addr ? Array.from(new Int32Array(M.wasmMemory.buffer, M._rc_watch_addr(), 8)) : []; } catch { return []; }
   };
   const beat = () => {
     try {
       const w = counters();
       if (w.length) { if (lastFrames >= 0) fps = Math.round((w[2] - lastFrames) / 5); lastFrames = w[2]; }
       sessionStorage.setItem(RUN_STORE, JSON.stringify({ t: Date.now(), t0, m: RcControls.inMission() ? 1 : 0, touch: touch ? 1 : 0, bg: document.hidden ? 1 : 0,
-        fps, page: pageMB, lt: Math.round(longTask), pp: w[0], gp: w[1], gf: w[4], io: M && M._rc_io_activity ? M._rc_io_activity() : 0 }));
+        fps, page: pageMB, lt: Math.round(longTask), pp: w[0], gp: w[1], gf: w[4], gpu: w[7], io: M && M._rc_io_activity ? M._rc_io_activity() : 0 }));
     } catch { /* storage blocked */ }
   };
   const measure = () => {
@@ -977,8 +977,8 @@ function hangWorker() {
   let hangAt = 0, hangSent = false, stallAt = 0, stallSent = false, lastFrames = -1, lastIo = -1, lastMoveT = 0, fpsBefore = 0;
   const counters = () => {
     if (!mem || !addr) return {};
-    const a = new Int32Array(mem.buffer, addr, 7);
-    return { pp: a[0], gp: a[1], frames: a[2], queued: a[3], gf: a[4], beat: a[5], rb: a[6] };
+    const a = new Int32Array(mem.buffer, addr, 8);
+    return { pp: a[0], gp: a[1], frames: a[2], queued: a[3], gf: a[4], beat: a[5], rb: a[6], gpu: a[7] };
   };
   const hist = [];   // (time, frames presented) over the last 10 s, for the frame rate before a freeze
   const fps = () => {
@@ -1064,7 +1064,7 @@ function crashCheck() {
     v: 20, type: 'reload', ua: navigator.userAgent, mem: navigator.deviceMemory || 0, cores: navigator.hardwareConcurrency || 0,
     played: Math.round((r.t - r.t0) / 1000), gap: Math.round((Date.now() - r.t) / 1000), mission: r.m, touch: r.touch, bg: r.bg,
     nav: performance.getEntriesByType('navigation')[0]?.type || '', screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
-    fps: r.fps, page: r.page, lt: r.lt, pp: r.pp, gp: r.gp, gf: r.gf, io: r.io,   // the state at the last beat before the end
+    fps: r.fps, page: r.page, lt: r.lt, pp: r.pp, gp: r.gp, gf: r.gf, io: r.io, gpu: r.gpu,   // the state at the last beat before the end
   };
   console.warn('the previous run ended without unloading (the browser killed the page?)', info);
   try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(info)], { type: 'application/json' })); } catch { /* no beacon */ }
@@ -1202,11 +1202,14 @@ async function boot() {
 // every visit and fought the page's own key layout. On every start the shipped copy is fetched again (3.7 KB)
 // over the one in storage, so the game always starts with its default bindings; keys are changed in the
 // page's panel. A failed fetch keeps whatever is there, so an offline start still works.
+// It also carries the mission unlock (GOActiveMission = 14, so "Finding the bomb" is listed). CONFIG_REV is in
+// the URL because Cloudflare keeps /game/ files as immutable: bump it whenever the shipped config.qvm changes.
+const CONFIG_REV = 2;
 async function refreshConfig(list) {
   const e = list.find((f) => f.path.toLowerCase() === 'config.qvm');   // the root one (LANGUAGE/* has its own)
   if (!e) return;
   try {
-    const r = await fetch('game/' + e.path.split('/').map(encodeURIComponent).join('/'), { cache: 'no-cache' });
+    const r = await fetch('game/' + e.path.split('/').map(encodeURIComponent).join('/') + '?rev=' + CONFIG_REV, { cache: 'no-cache' });
     if (!r.ok) return;
     const buf = await r.arrayBuffer();
     if (buf.byteLength !== e.size) return;
@@ -1288,7 +1291,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp16.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp17.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

@@ -121,7 +121,7 @@ uint64_t sched_now_us(void);
    page_phase: 0 idle, 1 in rc_gpu_pump, 2 taking the queue lock, 10+command type while running a command.
    game_phase (the game's main thread only): 0 running, 1 waiting for the page to present, 2 waiting for a
    readback, 3 waiting for the renderer at start, 4 in a file open/read, 5 in WaitForSingleObject, 6 in Sleep. */
-typedef struct { volatile int page_phase, game_phase, frames, queued, game_frame, beat, readbacks; } RcWatch;
+typedef struct { volatile int page_phase, game_phase, frames, queued, game_frame, beat, readbacks, gpu_errors; } RcWatch;
 extern RcWatch g_watch;
 
 #endif
