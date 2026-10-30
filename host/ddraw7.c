@@ -416,8 +416,8 @@ W(dd_EnumDisplayModes) {
        and its HUD layout all follow; its field of view is widened to match through rc_aspect_x
        (ports/project-igi/patch.sh) on frames drawn wide, and on the others the executor squeezes its 4:3 picture
        back from the wide screen. RC_WIDE_DISPLAY=0 offers the 4:3 modes (testing). */
-    { const char *e = getenv("RC_WIDE_DISPLAY");
-      if (!e || atoi(e)) {
+    { const char *e = getenv("RC_WIDE_DISPLAY");   /* on only when asked (the page asks with keyboard and mouse) */
+      if (e && atoi(e)) {
           extern int g_window_w, g_window_h;
           double a = g_window_h > 0 ? (double)g_window_w / (double)g_window_h : 16.0 / 9;
           if (a < 16.0 / 9) a = 16.0 / 9;

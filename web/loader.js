@@ -784,9 +784,11 @@ const isWebKit = () => /AppleWebKit\//.test(navigator.userAgent) && !/Chrome\/|C
 // mostly never touched), and on Windows that whole size counts as committed memory, which is what pushes an
 // 8 GB machine with other things open into paging (the field reports' minute-long whole-process freezes).
 // Compact keeps it at ~0.5 GB and grows it only as the game allocates. ?mem=full restores the old layout.
+// (2026-10-31: back to WebKit only. Compact on every browser went live with recomp15 on the morning of
+// 2026-10-30, the morning players started reporting black screens on Android; reverted until proven on phones.)
 function compactMemory() {
   const want = params.get('mem');
-  return want !== 'full';
+  return want === 'compact' || (want !== 'full' && isWebKit());
 }
 
 // The browser dropped the WebGPU device (its GPU process died, or the page was pushed out of memory): the
@@ -886,7 +888,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=19';
+  script.src = 'build/recomp.js?v=20';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -899,6 +901,10 @@ async function run(session) {
       if (params.has('pads')) m.ENV.RC_PADS = params.get('pads');
       if (params.has('input')) m.ENV.RC_INPUT = params.get('input');   // testing: scripted input (host/input.c)
       if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';               // testing: the game's poll spins unyielded (host/user32.c)
+      // Widescreen display modes (host/ddraw7.c) only with keyboard and mouse: on phones the game runs in its
+      // original 4:3 modes, as it did until 2026-10-30 (black screens on some Android phones followed the switch).
+      // ?widemodes / ?nowidemodes force it either way.
+      if (params.has('widemodes') || (!params.has('nowidemodes') && !touch)) m.ENV.RC_WIDE_DISPLAY = '1';
       if (params.has('peeklog')) m.ENV.RC_PEEK_LOG = '1';               // testing: poll interval log in the console
       if (params.has('poke')) m.ENV.RC_POKE = params.get('poke');      // testing: memory pokes (host/input.c)
       if (params.has('queue')) m.ENV.RC_QUEUE = params.get('queue');
@@ -1162,9 +1168,13 @@ async function boot() {
   if (!adapter) {
     cannot('nogpu');
     const firefox = /Firefox\//.test(navigator.userAgent);
-    status('WebGPU is switched on in this browser but it found no usable graphics adapter. ' +
-      (firefox ? 'Firefox only enables WebGPU for some GPUs and drivers (see about:support, "WebGPU"); Chrome or Edge usually work. '
-        : 'Check that hardware acceleration is on in the browser settings and the graphics driver is up to date. ') +
+    // Chrome switches graphics off for a site after the graphics process crashed while it was open, until the
+    // browser restarts: the commonest reason on machines that played before. Say that first.
+    status('The browser didn’t give the game a graphics adapter. If the game worked before in this browser, close the browser ' +
+      'completely (every tab, and on a phone swipe it away from recent apps) and open the site again: Chrome turns graphics off ' +
+      'for a site after a graphics crash, until it restarts. ' +
+      (firefox ? 'Firefox only enables WebGPU for some GPUs and drivers; Chrome or Edge usually work. '
+        : 'Otherwise check that hardware acceleration is on in the browser settings and the graphics driver is up to date. ') +
       'Remote Desktop and virtual machines often have no GPU for the browser.');
     return;
   }
@@ -1332,7 +1342,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp19.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp20.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;
