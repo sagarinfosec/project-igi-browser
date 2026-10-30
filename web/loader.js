@@ -901,10 +901,9 @@ async function run(session) {
       if (params.has('pads')) m.ENV.RC_PADS = params.get('pads');
       if (params.has('input')) m.ENV.RC_INPUT = params.get('input');   // testing: scripted input (host/input.c)
       if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';               // testing: the game's poll spins unyielded (host/user32.c)
-      // Widescreen display modes (host/ddraw7.c) only with keyboard and mouse: on phones the game runs in its
-      // original 4:3 modes, as it did until 2026-10-30 (black screens on some Android phones followed the switch).
-      // ?widemodes / ?nowidemodes force it either way.
-      if (params.has('widemodes') || (!params.has('nowidemodes') && !touch)) m.ENV.RC_WIDE_DISPLAY = '1';
+      // Widescreen display modes (host/ddraw7.c) only when asked (?widemodes): the game runs in its original 4:3
+      // modes everywhere, as it did until 2026-10-30; black screens on phones and desktops followed the switch.
+      if (params.has('widemodes')) m.ENV.RC_WIDE_DISPLAY = '1';
       if (params.has('peeklog')) m.ENV.RC_PEEK_LOG = '1';               // testing: poll interval log in the console
       if (params.has('poke')) m.ENV.RC_POKE = params.get('poke');      // testing: memory pokes (host/input.c)
       if (params.has('queue')) m.ENV.RC_QUEUE = params.get('queue');
