@@ -1323,15 +1323,17 @@ static void on_web_device_lost(WGPUDevice const *d, WGPUDeviceLostReason reason,
 }
 
 static void request_web_adapter(int attempt);
+static int g_compat;   /* the device is a WebGPU compatibility-mode one (request_web_adapter attempt 2) */
 static void on_web_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPUStringView msg, void *u1, void *u2) {
     (void)u2;
     int attempt = (int)(intptr_t)u1;
     if (st != WGPURequestAdapterStatus_Success) {
         fprintf(stderr, "[wgpu] adapter (attempt %d): %.*s\n", attempt, (int)msg.length, msg.data);
-        if (attempt < 2) request_web_adapter(attempt + 1);   /* default preference, then the software fallback */
+        if (attempt < 3) request_web_adapter(attempt + 1);   /* default preference, compatibility mode, then the software fallback */
         return;
     }
-    if (attempt == 2) fprintf(stderr, "[wgpu] using the browser's software (fallback) adapter: expect it to be slow\n");
+    if (attempt == 2) { g_compat = 1; fprintf(stderr, "[wgpu] using a WebGPU compatibility-mode adapter (OpenGL ES class)\n"); }
+    if (attempt == 3) fprintf(stderr, "[wgpu] using the browser's software (fallback) adapter: expect it to be slow\n");
     g_adapter = a;
     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
     dd.uncapturedErrorCallbackInfo.callback = on_error;
@@ -1358,11 +1360,16 @@ EMSCRIPTEN_KEEPALIVE void rc_gpu_init(int w, int h) {
     g_surface = wgpuInstanceCreateSurface(g_inst, &sd);
     request_web_adapter(0);
 }
-/* attempt 0: high-performance GPU; 1: any GPU; 2: the browser's software fallback adapter, if it has one */
+/* attempt 0: high-performance GPU; 1: any GPU; 2: WebGPU compatibility mode (Chrome 146+: OpenGL ES 3.1 on Android
+   phones whose Vulkan drivers can't carry full WebGPU, e.g. PowerVR GE8320 in Galaxy A03 / Oppo A54 / Redmi A3);
+   3: the browser's software fallback adapter, if it has one. RC_GPU_COMPAT=1 starts at 2 (testing: a compatibility
+   device that doesn't enable core features enforces compatibility's limits on any GPU). */
 static void request_web_adapter(int attempt) {
     WGPURequestAdapterOptions ao = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
+    if (attempt == 0 && getenv("RC_GPU_COMPAT")) attempt = 2;
     if (attempt == 0) ao.powerPreference = WGPUPowerPreference_HighPerformance;
-    if (attempt == 2) ao.forceFallbackAdapter = 1;
+    if (attempt == 2) ao.featureLevel = WGPUFeatureLevel_Compatibility;
+    if (attempt == 3) ao.forceFallbackAdapter = 1;
     WGPURequestAdapterCallbackInfo aci = WGPU_REQUEST_ADAPTER_CALLBACK_INFO_INIT;
     aci.mode = WGPUCallbackMode_AllowSpontaneous;
     aci.callback = on_web_adapter;

@@ -20,6 +20,31 @@
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
+// A/B experiments. Each browser draws a fixed bucket 0-99 once; an experiment is on for the buckets below its
+// share, so a change can go to a few percent of players first and its reports (crash.php, field "x") be compared
+// with everyone else's before it goes further. A browser whose run in an experiment ended badly (no frame, or
+// killed within two minutes) leaves that experiment for good (crashCheck). URL switches force either way.
+const EXPERIMENTS = { wide: 10, compact: 0 };   // percent of browsers (2026-10-31: wide display modes at 10%)
+const COHORT = (() => {
+  let b = 99, off = {};
+  try {
+    b = parseInt(localStorage.getItem('igi-bucket'), 10);
+    if (!(b >= 0 && b < 100)) { b = Math.floor(Math.random() * 100); localStorage.setItem('igi-bucket', String(b)); }
+    off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {};
+  } catch { b = 99; }
+  const on = {};
+  for (const [k, pct] of Object.entries(EXPERIMENTS)) on[k] = !off[k] && b < pct;
+  if (params.has('widemodes')) on.wide = true;
+  if (params.has('nowidemodes')) on.wide = false;
+  if (params.get('mem') === 'compact') on.compact = true;
+  if (params.get('mem') === 'full') on.compact = false;
+  return { bucket: b, on, tag: Object.keys(on).filter((k) => on[k]).join('+') || 'base' };
+})();
+// one-line telemetry to crash.php (field x = the experiments this browser is in)
+const beacon = (type, extra) => {
+  try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, ua: navigator.userAgent,
+    mem: navigator.deviceMemory || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` }, extra || {}))], { type: 'application/json' })); } catch { /* no beacon */ }
+};
 const OPFS_DIR = 'rcgame';
 const MARKER = '.installed.json';   // { version } once every file is copied
 const NETPLAY_BASE = new URL(params.get('netplay') || './', location.href).href.replace(/\/?$/, '/');
@@ -470,9 +495,9 @@ function applyPreset(name) {
   for (const [id, , def] of CONTROLS) userKeys[id] = def[preset];
   saveControls(); rebuildRemap();
 }
-// Players from before the layouts existed (the site remapped to WASD then, with no choice) keep WASD: their
-// saved keys, or, with none saved, the modern preset when the game was already installed in this browser
-// (boot() calls this once it knows). New players get the game's own keys.
+// Players without a saved choice get the Modern (WASD) layout: earlier players were moved to WASD, new ones got the
+// game's own keys (arrows and the numpad, which most laptops lack), so two players saw different "defaults"
+// (2026-10-31). A saved choice is never changed.
 function migratePreset(installed) {
   let had = false;
   try { had = localStorage.getItem(PRESET_STORE) !== null; } catch { /* storage blocked */ }
@@ -480,8 +505,8 @@ function migratePreset(installed) {
   let custom = false;
   try { custom = localStorage.getItem(CONTROL_STORE) !== null; } catch { /* storage blocked */ }
   if (custom) { preset = 'modern'; saveControls(); loadControls(); }
-  else if (installed) applyPreset('modern');
-  else applyPreset('original');
+  else applyPreset('modern');
+  void installed;
   setupControls.render?.();
 }
 loadControls();
@@ -788,7 +813,7 @@ const isWebKit = () => /AppleWebKit\//.test(navigator.userAgent) && !/Chrome\/|C
 // 2026-10-30, the morning players started reporting black screens on Android; reverted until proven on phones.)
 function compactMemory() {
   const want = params.get('mem');
-  return want === 'compact' || (want !== 'full' && isWebKit());
+  return want === 'compact' || (want !== 'full' && (isWebKit() || COHORT.on.compact));
 }
 
 // The browser dropped the WebGPU device (its GPU process died, or the page was pushed out of memory): the
@@ -796,7 +821,7 @@ function compactMemory() {
 window.rcDeviceLost = (msg) => {
   if ($('gpulost')) return;
   try {   // telemetry (crash.php): how often the browser drops the device, and why
-    navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 20, type: 'gpulost', msg: String(msg || '').slice(0, 200), ua: navigator.userAgent,
+    navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 21, x: COHORT.tag, type: 'gpulost', msg: String(msg || '').slice(0, 200), ua: navigator.userAgent,
       mem: navigator.deviceMemory || 0, mission: RcControls.inMission() ? 1 : 0, bg: document.hidden ? 1 : 0 })], { type: 'application/json' }));
   } catch { /* no beacon */ }
   const d = document.createElement('div');
@@ -878,6 +903,7 @@ async function run(session) {
   const audio = newAudioContext();   // first, while the click that called run() is still a user gesture
   const touch = !session && RcTouch.wanted();
   if (touch) RcTouch.goFullscreen($('stage'));   // also needs the gesture
+  else if (!session) setupFullscreen.enter?.();   // desktop too: the game fills the screen (Esc kept for its menu; Alt+Enter leaves)
   $('panel').classList.add('hidden');
   document.body.classList.add('playing');   // enables the touch re-fullscreen pill (index.html)
   showBoot();   // cover the black canvas until the first frame renders (see frame loop below)
@@ -888,7 +914,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=20';
+  script.src = 'build/recomp.js?v=21';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -900,10 +926,11 @@ async function run(session) {
       if (params.has('log')) m.ENV.RC_LOG = '1';
       if (params.has('pads')) m.ENV.RC_PADS = params.get('pads');
       if (params.has('input')) m.ENV.RC_INPUT = params.get('input');   // testing: scripted input (host/input.c)
-      if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';               // testing: the game's poll spins unyielded (host/user32.c)
+      if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';
+      if (params.has('gpucompat')) m.ENV.RC_GPU_COMPAT = '1';            // testing: a WebGPU compatibility-mode device               // testing: the game's poll spins unyielded (host/user32.c)
       // Widescreen display modes (host/ddraw7.c) only when asked (?widemodes): the game runs in its original 4:3
       // modes everywhere, as it did until 2026-10-30; black screens on phones and desktops followed the switch.
-      if (params.has('widemodes')) m.ENV.RC_WIDE_DISPLAY = '1';
+      if (COHORT.on.wide) m.ENV.RC_WIDE_DISPLAY = '1';   // the wide experiment (A/B, see COHORT)
       if (params.has('peeklog')) m.ENV.RC_PEEK_LOG = '1';               // testing: poll interval log in the console
       if (params.has('poke')) m.ENV.RC_POKE = params.get('poke');      // testing: memory pokes (host/input.c)
       if (params.has('queue')) m.ENV.RC_QUEUE = params.get('queue');
@@ -948,7 +975,7 @@ async function run(session) {
         // on the first frame: while the game loads a cold install it submits nothing for up to ~2 minutes,
         // then a stray clear-frame, then the real render loop. Counting to a couple dozen frames waits for
         // that render loop so the cover never lifts onto a still-black screen.
-        if (!booted) { shownFrames += n; if (shownFrames >= 24) { booted = true; hideBoot(); } }
+        if (!booted) { shownFrames += n; if (shownFrames >= 24) { booted = true; hideBoot(); runFlags.booted = 1; beacon('start', { touch: touch ? 1 : 0, t: Math.round(performance.now() / 1000) }); } }
         else if (loading) { loading = false; hideLoading(); }   // frames resumed: level finished loading
       } else if (booted && !loading && !session && lastPresent && t - lastPresent > 2500) {
         // Booted and running, but no frame for 2.5 s: the game is blocked loading a mission/level. Cover the
@@ -991,7 +1018,9 @@ function crashWatch(M, touch) {
     try {
       const w = counters();
       if (w.length) { if (lastFrames >= 0) fps = Math.round((w[2] - lastFrames) / 5); lastFrames = w[2]; }
+      if (!runFlags.play && RcControls.inMission()) { runFlags.play = 1; beacon('play', { touch: touch ? 1 : 0, t: Math.round((Date.now() - t0) / 1000) }); }
       sessionStorage.setItem(RUN_STORE, JSON.stringify({ t: Date.now(), t0, m: RcControls.inMission() ? 1 : 0, touch: touch ? 1 : 0, bg: document.hidden ? 1 : 0,
+        x: COHORT.tag, booted: runFlags.booted || 0, play: runFlags.play || 0,
         fps, page: pageMB, lt: Math.round(longTask), pp: w[0], gp: w[1], gf: w[4], gpu: w[7], io: M && M._rc_io_activity ? M._rc_io_activity() : 0 }));
     } catch { /* storage blocked */ }
   };
@@ -1001,7 +1030,15 @@ function crashWatch(M, touch) {
   beat(); measure();
   setInterval(beat, 5000);
   setInterval(measure, 60000);   // the measurement waits for a garbage collection: once a minute is plenty
-  window.addEventListener('pagehide', () => { try { sessionStorage.removeItem(RUN_STORE); } catch { /* storage blocked */ } });
+  window.addEventListener('pagehide', () => {
+    try { sessionStorage.removeItem(RUN_STORE); } catch { /* storage blocked */ }
+    // an experiment session that ends (a reload, closing the tab) without ever reaching a mission after 20 s may be
+    // a black screen the player gave up on: leave the experiments in this browser (conservative by design)
+    if (COHORT.tag !== 'base' && !runFlags.play && Date.now() - t0 > 20000) {
+      try { const off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {}; for (const k of COHORT.tag.split('+')) off[k] = 1; localStorage.setItem('igi-exp-off', JSON.stringify(off)); } catch { /* storage blocked */ }
+      beacon('expoff', { booted: runFlags.booted || 0, played: Math.round((Date.now() - t0) / 1000) });
+    }
+  });
   hangWatch(M, touch);
 }
 
@@ -1084,7 +1121,7 @@ function hangWatch(M, touch) {
     try { if (e.data.ga && typeof gtag === 'function') gtag('event', 'freeze_' + e.data.ga); } catch { /* analytics blocked */ }
   };
   w.postMessage({ init: 1, memory: M.wasmMemory, addr: M._rc_watch_addr(), info: {
-    v: 20, ua: navigator.userAgent, mem: navigator.deviceMemory || 0, cores: navigator.hardwareConcurrency || 0,
+    v: 21, x: COHORT.tag, ua: navigator.userAgent, mem: navigator.deviceMemory || 0, cores: navigator.hardwareConcurrency || 0,
     touch: touch ? 1 : 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` } });
   // the longest task the page thread ran (ms): a hang that ends shows as one long task; a stutter as many
   let lt = 0;
@@ -1097,16 +1134,23 @@ function hangWatch(M, touch) {
   setInterval(beat, 1000);
   document.addEventListener('visibilitychange', beat);
 }
+const runFlags = {};   // this run: booted (24 frames shown), play (the player reached a mission)
 function crashCheck() {
   let r = null;
   try { r = JSON.parse(sessionStorage.getItem(RUN_STORE) || 'null'); sessionStorage.removeItem(RUN_STORE); } catch { r = null; }
   if (!r || typeof r.t !== 'number' || Date.now() - r.t > 120000) return;   // not the reload right after a running game
   const info = {
-    v: 20, type: 'reload', ua: navigator.userAgent, mem: navigator.deviceMemory || 0, cores: navigator.hardwareConcurrency || 0,
+    v: 21, type: 'reload', ua: navigator.userAgent, mem: navigator.deviceMemory || 0, cores: navigator.hardwareConcurrency || 0,
     played: Math.round((r.t - r.t0) / 1000), gap: Math.round((Date.now() - r.t) / 1000), mission: r.m, touch: r.touch, bg: r.bg,
     nav: performance.getEntriesByType('navigation')[0]?.type || '', screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
     fps: r.fps, page: r.page, lt: r.lt, pp: r.pp, gp: r.gp, gf: r.gf, io: r.io, gpu: r.gpu,   // the state at the last beat before the end
+    x: r.x || '', booted: r.booted || 0, play: r.play || 0,
   };
+  // a run in an experiment that never showed the game, or was killed within two minutes: leave the experiments
+  if (r.x && r.x !== 'base' && (!r.booted || (r.fps === 0 && info.played < 120) || info.played < 120)) {
+    try { const off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {}; for (const k of r.x.split('+')) off[k] = 1; localStorage.setItem('igi-exp-off', JSON.stringify(off)); } catch { /* storage blocked */ }
+    info.expoff = 1;
+  }
   console.warn('the previous run ended without unloading (the browser killed the page?)', info);
   try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(info)], { type: 'application/json' })); } catch { /* no beacon */ }
   if (!r.bg) $('crashnote')?.classList.remove('hidden');   // a kill in the background is the OS reclaiming a hidden tab, not a crash
@@ -1156,13 +1200,16 @@ async function boot() {
   if (!crossOriginIsolated) { status('This browser can’t run the game yet — it’s missing a feature the game needs (cross-origin isolation). ' + needHint); return; }
   // Count the visitors the game can't start for, and on what (crash.php type nowebgpu / nogpu): the size of
   // the audience a second renderer (WebGL) would reach. Device model is in the user agent on Android.
-  const cannot = (type) => { try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 20, type, ua: navigator.userAgent, mem: navigator.deviceMemory || 0,
+  const cannot = (type) => { try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 21, x: COHORT.tag, type, ua: navigator.userAgent, mem: navigator.deviceMemory || 0,
     cores: navigator.hardwareConcurrency || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` })], { type: 'application/json' })); } catch { /* no beacon */ } };
   if (!navigator.gpu) { cannot('nowebgpu'); status('This browser doesn’t support WebGPU, which the game needs for graphics. ' + needHint); return; }
   // navigator.gpu can exist with no usable adapter (GPU or driver blocklisted, hardware acceleration off,
   // Remote Desktop / VM): say so instead of starting a game that can only show a black screen
+  // (featureLevel 'compatibility': WebGPU on OpenGL ES 3.1, Chrome 146+, for phones without full WebGPU; the engine
+  // asks in the same order, host/render_wgpu.c request_web_adapter)
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null) ||
     await navigator.gpu.requestAdapter().catch(() => null) ||
+    await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' }).catch(() => null) ||
     await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null);
   if (!adapter) {
     cannot('nogpu');
@@ -1255,6 +1302,33 @@ async function boot() {
 // It also carries the mission unlock (GOActiveMission = 14, so "Finding the bomb" is listed). CONFIG_REV is in
 // the URL because Cloudflare keeps /game/ files as immutable: bump it whenever the shipped config.qvm changes.
 const CONFIG_REV = 2;
+// The stock config also resets the game's own mouse settings, so a player's in-game sensitivity or invert
+// was lost at every start (reported as "sensitivity changed but not applied", 2026-10-31). Carry those two over
+// from the player's saved copy. Records in the compiled config (the LOOP script) read
+//   0d <name#> 18 01 00 00 00 <u32 string offset> 14 <type> 00 00 00 <value>
+// with name #5 = GOInMouSens (type 6: 05 + float) and #4 = GOInMouInv (type 2: one byte, 0f false / 10 true), one
+// record per player profile, matched in order. Anything unexpected keeps the stock values.
+function keepPlayerMouse(saved, fresh) {
+  const find = (b, name, type) => {
+    const at = [];
+    for (let i = 0; i + 17 < b.length; i++)
+      if (b[i] === 0x0d && b[i + 1] === name && b[i + 2] === 0x18 && b[i + 3] === 1 && b[i + 4] === 0 && b[i + 5] === 0 && b[i + 6] === 0 &&
+          b[i + 11] === 0x14 && b[i + 12] === type && b[i + 13] === 0 && b[i + 14] === 0 && b[i + 15] === 0) at.push(i + 16);
+    return at;
+  };
+  const out = fresh.slice();
+  const sensS = find(saved, 5, 6), sensF = find(out, 5, 6);
+  if (sensS.length && sensS.length === sensF.length)
+    sensS.forEach((o, k) => {
+      if (saved[o] !== 0x05) return;
+      const v = new DataView(saved.buffer, saved.byteOffset + o + 1, 4).getFloat32(0, true);
+      if (v > 0.02 && v < 3 && out[sensF[k]] === 0x05) out.set(saved.subarray(o, o + 5), sensF[k]);
+    });
+  const invS = find(saved, 4, 2), invF = find(out, 4, 2);
+  if (invS.length && invS.length === invF.length)
+    invS.forEach((o, k) => { if (saved[o] === 0x0f || saved[o] === 0x10) out[invF[k]] = saved[o]; });
+  return out;
+}
 async function refreshConfig(list) {
   const e = list.find((f) => f.path.toLowerCase() === 'config.qvm');   // the root one (LANGUAGE/* has its own)
   if (!e) return;
@@ -1263,8 +1337,11 @@ async function refreshConfig(list) {
     if (!r.ok) return;
     const buf = await r.arrayBuffer();
     if (buf.byteLength !== e.size) return;
-    const w = await (await fileHandle(await gameDir(true), e.path, true)).createWritable();
-    await w.write(buf); await w.close();
+    const fh = await fileHandle(await gameDir(true), e.path, true);
+    let fresh = new Uint8Array(buf);
+    try { fresh = keepPlayerMouse(new Uint8Array(await (await fh.getFile()).arrayBuffer()), fresh); } catch { /* no saved copy yet */ }
+    const w = await fh.createWritable();
+    await w.write(fresh); await w.close();
   } catch (err) { console.warn('config.qvm refresh skipped:', err.message); }
 }
 
@@ -1282,11 +1359,20 @@ function setupFullscreen() {
   document.addEventListener('fullscreenchange', syncFsClass);
   document.addEventListener('webkitfullscreenchange', syncFsClass);
   syncFsClass();
+  // In fullscreen the page asks to keep Esc (Keyboard Lock, Chrome and Edge): a tap of Esc then opens the game's
+  // menu as players expect, and holding Esc still leaves fullscreen (the browser's rule). Without the lock the
+  // first Esc leaves fullscreen.
+  const enter = () => {
+    const p = (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+    const lock = () => { try { navigator.keyboard?.lock?.(['Escape'])?.catch?.(() => {}); } catch { /* not supported */ } };
+    if (p && p.then) p.then(lock).catch(() => {}); else lock();
+  };
   const toggle = () => {
-    if (active()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage)?.catch?.(() => {});
+    if (active()) { try { navigator.keyboard?.unlock?.(); } catch { /* not supported */ } (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else enter();
     $('canvas').focus();
   };
+  setupFullscreen.enter = () => { if (!active() && (stage.requestFullscreen || stage.webkitRequestFullscreen)) enter(); };
   if (!stage.requestFullscreen && !stage.webkitRequestFullscreen) { $('fs').classList.add('hidden'); return; }
   $('fs').onclick = toggle;
   const swallow = (e) => {
@@ -1341,7 +1427,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp20.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp21.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;
