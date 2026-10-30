@@ -643,7 +643,7 @@
           <button id="home-controls" type="button" class="link-btn">Controls &amp; layout</button>
           <a href="#" id="reset" class="link-btn">Use a different game folder</a>
         </div>
-        <p class="home-foot" id="updated">Updated <b>30 Oct 2026, 08:31 IST</b> · fixes land often: reload before reporting an old issue</p>
+        <p class="home-foot" id="updated">Updated <b>30 Oct 2026, 14:43 IST</b> · fixes land often: reload before reporting an old issue</p>
       </section>
 
       <!-- multiplayer: host or join -->
@@ -799,7 +799,7 @@
 <script src="netplay.js"></script>
 <script src="controls.js?v=8"></script>
 <script src="touch.js?v=12"></script>
-<script src="loader.js?v=30"></script>
+<script src="loader.js?v=31"></script>
 <script>
   // Ads (Adsterra; slots switched on in RC_ADS, the network's tags in ad.html). The page is cross-origin
   // isolated, which blocks third-party ad frames, so each unit loads ad.html inside an <iframe credentialless>:
@@ -815,57 +815,81 @@
       var f = document.createElement('iframe');
       f.credentialless = true;
       f.setAttribute('credentialless', '');
+      // Sandboxed: an ad may open its own tab, never navigate this page (a creative redirected players to a
+      // "lucky draw" scam page within a second of opening the link, seen in two recordings on 2026-10-30).
+      f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
       f.src = 'ad.html?slot=' + slot;
       f.width = w; f.height = h; f.title = 'Advertisement'; f.scrolling = 'no';
       f.style.cssText = 'width:' + w + 'px;height:' + h + 'px';
       return f;
     };
     var coarse = document.body.classList.contains('coarse');
-    var row = document.getElementById('adrow'), stage = document.getElementById('stage');
-    if (coarse) { if (promo) promo.remove(); if (row) row.remove(); }
-    else {
-      // Desktop. Wide windows (1900x900 and up): the 728x90 under the gutter unit and the 300x250 under the
-      // controls panel (body.ads-wide). Smaller: the 728x90 in a row under the stage. Units are made only for
-      // the layout in use (never two copies), and remade when a resize changes the layout.
-      var box = document.createElement('aside'); box.id = 'adbox'; box.setAttribute('aria-label', 'Advertisement');
-      document.body.appendChild(box);
-      var mode = '';
-      var clear = function (el) { el.querySelectorAll('.ad-unit').forEach(function (n) { n.remove(); }); };
-      var unit = function (slot, w, h, tag) {
-        var c = document.createElement('div'); c.className = 'ad-unit ' + slot;
-        if (tag) c.innerHTML = '<span class="ad-tag">Advertisement</span>';
-        c.appendChild(frame(slot, w, h)); return c;
-      };
-      var layout = function () {
-        var playing = document.body.classList.contains('playing');
-        var wide = innerWidth >= 1900 && innerHeight >= 900, m = wide ? 'wide' : 'row';   // the stage keeps at least ~770px
-        if (m !== mode) {
-          mode = m; [promo, row, box].forEach(clear);
-          document.body.classList.toggle('ads-wide', wide);
-          if (A.side) promo.appendChild(unit('side', 160, 600));
-          if (wide) { if (A.lead) promo.appendChild(unit('lead', 728, 90)); if (A.box) box.appendChild(unit('box', 300, 250, true)); }
-          else if (A.lead) row.appendChild(unit('lead', 728, 90, true));
-          promo.classList.toggle('on', !!A.side);
-          row.classList.toggle('on', !wide && !!A.lead);
-          box.classList.toggle('on', wide && !!A.box);
-          document.body.classList.toggle('ads-row', !wide && !!A.lead);
-        }
-        row.style.width = stage.getBoundingClientRect().width + 'px';
-        var h = !wide && row.classList.contains('on') && !playing ? row.offsetHeight + 14 : 0;
-        document.documentElement.style.setProperty('--adrow-h', h + 'px');
-      };
-      layout(); addEventListener('resize', layout); setTimeout(layout, 300);
-      new MutationObserver(layout).observe(document.body, { attributes: true, attributeFilter: ['class'] });
-    }
-    var units = coarse ? (A.mobile ? [['mobile', 320, 50]] : []) : [];
-    if (A.social) units.push(['social', 320, 160]);
-    if (units.length) {   // phones: a banner under the landing views (inside the home view, in flow)
-      var d = document.createElement('div');
-      d.id = 'admob'; d.className = 'on';
-      d.innerHTML = '<span class="ad-tag">Advertisement</span>';
-      units.forEach(function (u) { d.appendChild(frame(u[0], u[1], u[2])); });
-      document.getElementById('view-home').appendChild(d);
-    }
+    var row = document.getElementById('adrow'), stage = document.getElementById('stage'), home = document.getElementById('view-home');
+    var units = [];   // every frame made, for the teardown
+    var built = false;
+    var build = function () {
+      if (built) return;
+      built = true;
+      if (coarse) { if (promo) promo.remove(); if (row) row.remove(); }
+      else {
+        // Desktop. Wide windows (1900x900 and up): the 728x90 under the gutter unit and the 300x250 under the
+        // controls panel (body.ads-wide). Smaller: the 728x90 in a row under the stage. Units are made only for
+        // the layout in use (never two copies), and remade when a resize changes the layout.
+        var box = document.createElement('aside'); box.id = 'adbox'; box.setAttribute('aria-label', 'Advertisement');
+        document.body.appendChild(box);
+        var mode = '';
+        var clear = function (el) { el.querySelectorAll('.ad-unit').forEach(function (n) { n.remove(); }); };
+        var unit = function (slot, w, h, tag) {
+          var c = document.createElement('div'); c.className = 'ad-unit ' + slot;
+          if (tag) c.innerHTML = '<span class="ad-tag">Advertisement</span>';
+          c.appendChild(frame(slot, w, h)); return c;
+        };
+        var layout = function () {
+          var playing = document.body.classList.contains('playing');
+          var wide = innerWidth >= 1900 && innerHeight >= 900, m = wide ? 'wide' : 'row';   // the stage keeps at least ~770px
+          if (m !== mode) {
+            mode = m; [promo, row, box].forEach(clear);
+            document.body.classList.toggle('ads-wide', wide);
+            if (A.side) promo.appendChild(unit('side', 160, 600));
+            if (wide) { if (A.lead) promo.appendChild(unit('lead', 728, 90)); if (A.box) box.appendChild(unit('box', 300, 250, true)); }
+            else if (A.lead) row.appendChild(unit('lead', 728, 90, true));
+            promo.classList.toggle('on', !!A.side);
+            row.classList.toggle('on', !wide && !!A.lead);
+            box.classList.toggle('on', wide && !!A.box);
+            document.body.classList.toggle('ads-row', !wide && !!A.lead);
+          }
+          row.style.width = stage.getBoundingClientRect().width + 'px';
+          var h = !wide && row.classList.contains('on') && !playing ? row.offsetHeight + 14 : 0;
+          document.documentElement.style.setProperty('--adrow-h', h + 'px');
+        };
+        layout(); addEventListener('resize', layout); setTimeout(layout, 300);
+        new MutationObserver(layout).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      }
+      var units = coarse ? (A.mobile ? [['mobile', 320, 50]] : []) : [];
+      if (A.social) units.push(['social', 320, 160]);
+      if (units.length) {   // phones: a banner under the landing views (inside the home view, in flow)
+        var d = document.createElement('div');
+        d.id = 'admob'; d.className = 'on';
+        d.innerHTML = '<span class="ad-tag">Advertisement</span>';
+        units.forEach(function (u) { d.appendChild(frame(u[0], u[1], u[2])); });
+        document.getElementById('view-home').appendChild(d);
+      }
+
+    };
+    // Ads only on the real home view (never on the "can't run" / download / error views) and only until the
+    // game starts: then every frame is removed, so no ad code runs behind the game.
+    var teardown = function () {
+      document.querySelectorAll('iframe[src^="ad.html"]').forEach(function (f) { f.remove(); });
+      if (promo) promo.remove(); if (row) row.remove();
+      var b = document.getElementById('adbox'); if (b) b.remove();
+    };
+    var watch = new MutationObserver(function () {
+      if (document.body.classList.contains('playing')) { teardown(); watch.disconnect(); return; }
+      if (home && !home.classList.contains('hidden')) build();
+    });
+    watch.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    if (home) watch.observe(home, { attributes: true, attributeFilter: ['class'] });
+    if (home && !home.classList.contains('hidden')) build();
     // ?adtest: each ad frame reports what happened inside it (ad.html), shown under the landing views
     if (new URLSearchParams(location.search).has('adtest')) {
       var box = document.createElement('pre');

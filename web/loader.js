@@ -1097,6 +1097,21 @@ async function boot() {
   const needHint = isIOS
     ? 'On iPhone or iPad this needs iOS 26 or later, opened in Safari. Please update iOS and try again.'
     : 'Please use an up-to-date Chrome or Edge (Android or desktop), or Safari 26+ on Apple devices.';
+  // Links tapped inside Instagram, Facebook, WhatsApp or other apps open in the app's own browser view, which
+  // lacks the features the game needs: say so and offer the way out (Android: open Chrome by intent; else copy).
+  const inApp = /Instagram|FBAN|FBAV|FB_IAB|Line\/|Snapchat|; wv\)|WhatsApp|Twitter|TikTok|Telegram/i.test(navigator.userAgent);
+  if (!crossOriginIsolated && inApp) {
+    const android = /Android/i.test(navigator.userAgent);
+    status('You opened this inside an app’s built-in browser, which can’t run the game. Open it in Chrome instead.');
+    const btn = $('download');
+    btn.textContent = android ? 'Open in Chrome' : 'Copy the link';
+    btn.classList.remove('hidden');
+    btn.onclick = () => {
+      if (android) location.href = 'intent://' + location.host + location.pathname + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end';
+      else { navigator.clipboard?.writeText(location.href).then(() => status('Link copied. Paste it in Safari or Chrome.')).catch(() => status('Copy this address and open it in Safari or Chrome: ' + location.href)); }
+    };
+    return;
+  }
   if (!crossOriginIsolated) { status('This browser can’t run the game yet — it’s missing a feature the game needs (cross-origin isolation). ' + needHint); return; }
   if (!navigator.gpu) { status('This browser doesn’t support WebGPU, which the game needs for graphics. ' + needHint); return; }
   // navigator.gpu can exist with no usable adapter (GPU or driver blocklisted, hardware acceleration off,
