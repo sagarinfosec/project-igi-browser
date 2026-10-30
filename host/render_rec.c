@@ -114,6 +114,7 @@ static int g_world_this_frame;
 /* Paused: the game's clock (PROFILE_TICK) has not moved for a few frames while a world is being drawn: the
    Esc menu is up over the frozen world, and the mouse drives its cursor, not the view. */
 int g_paused;
+int g_map;   /* the map computer is open over a mission: the mouse drives its cursor, not the view (PROFILE_MAP_FLAG) */
 static uint32_t g_tick_last; static int g_tick_still;
 /* The zoom: the projection the world is drawn with. m11 (y scale = 1 / tan(fov_y / 2)) grows as the sniper
    scope or the binoculars zoom in. Latched per frame like g_in_mission; the page's scope toggle reads it
@@ -684,8 +685,20 @@ static void rec_draw_impl(Device *d, uint32_t prim, uint32_t prim_count, uint32_
         float lw = (float)g_tgt_lw, lh = (float)g_tgt_lh, x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
         for (uint32_t i = 0; i < n; i++) { x0 = fminf(x0, cv[i].x); y0 = fminf(y0, cv[i].y); x1 = fmaxf(x1, cv[i].x); y1 = fmaxf(y1, cv[i].y); }
         float frac = fminf(1.f, fmaxf(0.f, fminf(x1, lw) - fmaxf(x0, 0.f)) * fmaxf(0.f, fminf(y1, lh) - fmaxf(y0, 0.f)) / (lw * lh));
+        if (n == 6 && y1 - y0 < 24.f) {   /* small quads may be subtitle glyphs (host/subtitle.c) */
+            extern void subtitle_glyph(float, float, float, float, float, float, float, float);
+            float gu0 = 1e9f, gv0 = 1e9f, gu1 = -1e9f, gv1 = -1e9f;
+            for (uint32_t i = 0; i < n; i++) { gu0 = fminf(gu0, cv[i].tc[0][0]); gv0 = fminf(gv0, cv[i].tc[0][1]); gu1 = fmaxf(gu1, cv[i].tc[0][0]); gv1 = fmaxf(gv1, cv[i].tc[0][1]); }
+            subtitle_glyph(x0, y0, x1, y1, gu0, gv0, gu1, gv1);
+        }
         if (frac < 0.9f) g_rec_cover += frac;   /* one quad over the whole screen is a fade, drawn over the wide picture as it is */
         if (d->frame == g_cmd_sig_frame) fprintf(stderr, "[cover] d%u n=%u box %g,%g-%g,%g frac %.3f total %.3f\n", g_f_drawn - 1, n, x0, y0, x1, y1, frac, g_rec_cover);
+        static int gevery = -1; if (gevery < 0) { const char *e = getenv("RC_GLYPH_EVERY"); gevery = e ? atoi(e) : 0; }
+        if ((d->frame == g_cmd_sig_frame || (gevery && d->frame % gevery == 0)) && n == 6) {   /* glyph quads: texture, position, texture coordinates */
+            float u0 = 1e9f, v0 = 1e9f, u1 = -1e9f, v1 = -1e9f;
+            for (uint32_t i = 0; i < n; i++) { u0 = fminf(u0, cv[i].tc[0][0]); v0 = fminf(v0, cv[i].tc[0][1]); u1 = fmaxf(u1, cv[i].tc[0][0]); v1 = fmaxf(v1, cv[i].tc[0][1]); }
+            fprintf(stderr, "[glyph] f%u d%u tex %u:%u xy %g,%g-%g,%g uv %.5f,%.5f-%.5f,%.5f col %08x\n", d->frame, g_f_drawn - 1, c->slot_kind[0], c->slot_id[0], x0, y0, x1, y1, u0, v0, u1, v1, cv[0].diffuse);
+        }
     }
     cmd_end();
 }
@@ -717,6 +730,7 @@ static void rec_present_impl(Device *d) {
     g_target_sent = 0;   /* the executor ends every frame on the back buffer */
     if (d->frame == g_cmd_sig_frame + 1) fprintf(stderr, "[sig] f%u end draws=%u\n", g_cmd_sig_frame, g_f_drawn);   /* the present of that frame's draws */
     g_f_drawn = 0;
+    { extern void subtitle_present(void); subtitle_present(); }
     {   /* the next frame's widescreen mode (see g_frame_wide): decided here so the game's field of view and the
            executor's mapping agree for the whole frame */
         extern void dd_display_size(int *, int *);
@@ -733,6 +747,9 @@ static void rec_present_impl(Device *d) {
     { uint32_t t = R32(PROFILE_TICK);
       g_tick_still = (t == g_tick_last) ? g_tick_still + 1 : 0;
       g_tick_last = t;
+#ifdef PROFILE_MAP_FLAG
+      g_map = g_in_mission && R32(PROFILE_MAP_FLAG) == 0;
+#endif
 #ifdef PROFILE_PAUSE_FLAG
       /* The game's own control flag (0 in the Esc menu, in cutscenes, when dead) together with the level timer
          standing still: the timer alone never runs in the last mission (always "paused"), the flag alone can stay 0
@@ -743,7 +760,7 @@ static void rec_present_impl(Device *d) {
 #endif
       { static int logit = -1; if (logit < 0) logit = getenv("RC_TICK_LOG") != NULL;   /* RC_TICK_LOG=1: the pause detector's inputs */
         if (logit && d->frame % 60 == 0) fprintf(stderr, "[tick] frame %u tick %u still %d world %d paused %d cand %x %x %x\n", d->frame, t, g_tick_still, g_in_mission, g_paused,
-                                                     R32(0x5468ccu), R32(0x5c8b24u), R32(0x5c8ba4u)); } }
+                                                     R32(0x5468ccu), g_map, 0); } }
 #endif
     if (getenv("RC_ZOOM_LOG") && g_zoom_this_frame != g_zoom) fprintf(stderr, "[zoom] frame %u: m11 %.5f\n", d->frame, g_zoom_this_frame);
     g_zoom = g_zoom_this_frame;

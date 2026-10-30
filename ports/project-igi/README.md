@@ -95,6 +95,19 @@ play, constant in pause, different between, same in both missions") found the ga
 (`PROFILE_PAUSE_FLAG`: 9 with control, 0 in the Esc menu, cutscenes and when dead); it can stay 0 after a resume,
 so paused = flag 0 AND timer still. `RC_TICK_LOG=1` prints the detector's inputs every 60 frames.
 
+Map computer (2026-10-31): 0x543c58 (`PROFILE_MAP_FLAG`) is 1 in play and 0 while the map is open (Esc leaves it
+1); with the map open the host stops treating the mouse as look (`g_map`: no Y inversion, no look scaling, the
+page sees "not in a mission"), which had made the map cursor feel inverted.
+
+Subtitles (2026-10-31): the game draws speech in a 3-11 px bitmap font. Every glyph is a pre-transformed quad whose
+texture rectangle identifies the character (packed atlases, one per font). `glyphs.h` holds the 113 rectangles of
+the two subtitle fonts, learned by logging glyph quads every 20 frames in six missions (`RC_GLYPH_EVERY=20`) and
+solving them against the game's English text files (`LANGUAGE/ENGLISH/*.RES`: a glyph line must match a substring
+of a known string, spaces removed). `host/subtitle.c` reads each frame's glyphs back, groups lines, infers spaces
+from gaps, keeps the lines that start with a speaker ("ANYA: ") and the lines that continue them, and exports the
+text (`rc_subtitle`); the page shows it in a caption (`#subcap`, setting "Large subtitles", on by default).
+`RC_SUB_LOG=1` prints each new subtitle natively. A new font or language needs the harvest and solve again.
+
 Testing switches: `RC_MEMSNAP=frame:addr:len:path`, `RC_POKE=frame:addr:hexbytes`, `RC_DUMP=frame:addr:len`
 (an address may be a pointer chain, `base>off>off`: each `>off` loads the dword so far and adds off, resolved
 at that frame — for objects on the heap), `RC_ZOOM_LOG=1`

@@ -71,6 +71,13 @@
      the stage, 440px is reserved symmetrically (220 each side) so the panel sits in that gap and the
      stage stays centred rather than off-set. On narrow viewports the panel is hidden and the stage uses
      the full width. The .kbd-off body class (set when the player dismisses the panel) frees the space. */
+  /* Large subtitles (loader.js: the game's speech read back from its tiny font by the engine) */
+  #subcap { position: absolute; left: 50%; top: max(10px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 6;
+    width: max-content; max-width: min(72%, 900px); padding: 7px 14px; border-radius: 10px; pointer-events: none;
+    background: rgba(0, 0, 0, .62); color: #f2f2f2; font: 600 clamp(13px, 2.1vw, 19px)/1.35 ui-sans-serif, system-ui, sans-serif;
+    text-align: center; text-shadow: 0 1px 2px #000; white-space: pre-line; }
+  #subcap b { color: #7ee2a0; font-weight: 800; }
+  body.touch #subcap { top: max(64px, calc(env(safe-area-inset-top, 0px) + 56px)); }
   #stage { position: relative; width: min(100%, calc((100vh - 150px - var(--adrow-h, 0px)) * 4 / 3)); aspect-ratio: 4 / 3; background: #000;
     border-radius: 12px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .55); }
   @media (min-width: 1120px) {
@@ -570,6 +577,7 @@
 </div>
 <main>
   <div id="stage">
+    <div id="subcap" class="hidden" aria-live="polite"></div>
     <canvas id="canvas" width="1024" height="768" tabindex="0"></canvas>
     <div id="netstatus" class="hidden"></div>
     <button id="fs" title="Fullscreen (Alt+Enter)" aria-label="Toggle fullscreen">
@@ -643,7 +651,7 @@
           <button id="home-controls" type="button" class="link-btn">Controls &amp; layout</button>
           <a href="#" id="reset" class="link-btn">Use a different game folder</a>
         </div>
-        <p class="home-foot" id="updated">Updated <b>30 Oct 2026, 19:46 IST</b> · fixes land often: reload before reporting an old issue</p>
+        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 00:35 IST</b> · fixes land often: reload before reporting an old issue</p>
       </section>
 
       <!-- multiplayer: host or join -->
@@ -797,9 +805,9 @@
   })();
 </script>
 <script src="netplay.js"></script>
-<script src="controls.js?v=8"></script>
-<script src="touch.js?v=12"></script>
-<script src="loader.js?v=34"></script>
+<script src="controls.js?v=9"></script>
+<script src="touch.js?v=13"></script>
+<script src="loader.js?v=35"></script>
 <script>
   // Ads (Adsterra; slots switched on in RC_ADS, the network's tags in ad.html). The page is cross-origin
   // isolated, which blocks third-party ad frames, so each unit loads ad.html inside an <iframe credentialless>:

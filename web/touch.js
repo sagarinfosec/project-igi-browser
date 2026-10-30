@@ -344,6 +344,10 @@ const RcTouch = (() => {
             <label><input type="checkbox" data-k="gyroInvY"> Invert up / down</label>
             <label><input type="checkbox" data-k="gyroInvX"> Invert left / right</label>
           </div></div>
+        <div class="ts-row"><span>Subtitles</span>
+          <div class="ts-checks">
+            <label><input type="checkbox" data-k="subs"> Large subtitles for the game's speech</label>
+          </div></div>
         <label class="ts-row"><span>Gyroscope sensitivity <output data-for="gyroSens"></output></span>
           <input type="range" min="0.2" max="3" step="0.1" data-k="gyroSens"></label>
         <div class="ts-row"><span>Screen</span>

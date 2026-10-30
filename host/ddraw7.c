@@ -426,9 +426,16 @@ W(dd_EnumDisplayModes) {
              1068x600 taken over 640x480, but 854x480 taken when both were offered; 900x480 wanted, 640x480 taken
              over 1286x600), so each mode keeps its pixel count and only changes shape: its choice maps one to
              one. The menus' 640x480 becomes 800x450 and is drawn back into a 4:3 box like any 2D screen. */
+          /* RC_UI_SCALE (the page's "text size" setting, larger on phones): the modes offered have this many
+             times fewer pixels per side. The game draws its HUD text and subtitles in fixed display pixels, so a
+             smaller display makes them proportionally larger on screen; the 3D world is drawn at the window's full
+             resolution either way (the executor scales the viewport), so it loses nothing. */
+          double ui = 1.0; { const char *u = getenv("RC_UI_SCALE"); if (u) ui = atof(u); if (ui < 1.0) ui = 1.0; if (ui > 2.5) ui = 2.5; }
           for (size_t i = 0; i < sizeof modes / sizeof modes[0]; i++) {
-              double px = (double)modes[i][0] * modes[i][1];
+              double px = (double)modes[i][0] * modes[i][1] / (ui * ui);
               uint32_t h = ((uint32_t)(sqrt(px / a) + 0.5) + 1) & ~1u;
+              /* the game takes a mode at least 800 wide for a mission: a scaled mode never goes below that */
+              if (ui > 1.0 && h * a < 800) h = ((uint32_t)(800 / a + 0.5) + 1) & ~1u;
               modes[i][1] = h;
               modes[i][0] = ((uint32_t)(h * a + 0.5) + 1) & ~1u;
           }
@@ -441,6 +448,7 @@ W(dd_EnumDisplayModes) {
             if (filter && (R32(filter + 4) & DDSD_HEIGHT) && R32(filter + 8) != modes[i][1]) continue;
             if (filter && (R32(filter + 4) & DDSD_PIXELFORMAT) && R32(filter + 84) != bpps[b]) continue;
             write_mode_desc(p, modes[i][0], modes[i][1], bpps[b]);
+            if (getenv("RC_MODE_LOG")) fprintf(stderr, "[ddraw] offer %ux%u %u bpp\n", modes[i][0], modes[i][1], bpps[b]);
             uint32_t a[2] = { p, ctx };
             if (!guest_stdcall(c, cb, 2, a)) { heap_free(p); RET(5, DD_OK); }
         }

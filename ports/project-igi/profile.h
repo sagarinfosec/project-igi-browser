@@ -23,6 +23,9 @@
 #define PROFILE_TICK       0x00a44398u   /* the level timer: stands still in the Esc menu, but never runs in the last mission */
 /* the game's control flag (found 2026-10-30 by diffing snapshots taken
    playing and paused in missions 1 and 14; preferred over the timer, which the last mission never starts) */
+/* 1 while the player looks through his own eyes, 0 while the map computer is open (found the same way: snapshots
+   with the map closed, open, closed again, in missions 1 and 14; it stays 1 in the Esc menu) */
+#define PROFILE_MAP_FLAG   0x00543c58u
 #define PROFILE_PAUSE_FLAG 0x005468ccu   /* 9 while the player has control; 0 in the Esc menu, in cutscenes and when dead */
 /* The mission's LevelFlow task object (a pointer, set while a mission is loaded): byte +0x60 is "level
    completed", +0x61 "level failed" (the script's Complete / Failed expressions, evaluated every tick). On a
@@ -30,4 +33,11 @@
 #define PROFILE_LEVELFLOW  0x00bc2360u
 #define PROFILE_LEVELFLOW_FAILED 0x61
 
+#endif
+
+/* Subtitles: the texture rectangles of the game's subtitle fonts (host/subtitle.c reads the text back from the
+   glyphs it draws and the page shows it in a large caption) */
+#define PROFILE_GLYPHS 1
+#ifdef RC_WANT_GLYPHS
+#include "glyphs.h"
 #endif

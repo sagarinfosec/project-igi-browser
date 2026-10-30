@@ -291,8 +291,8 @@ W(dev_GetDeviceState) {
         /* Browser movement is +down; IGI's mission look treats that as look-up, so invert Y to match the
            Windows original (push the mouse down -> aim down). Only in a mission: the 2D menus drive their
            cursor from the same axis the other way, so inverting there would reverse menu navigation. */
-        extern int g_in_mission, g_paused;
-        int look = g_in_mission && !g_paused;   /* the Esc menu over the world drives a cursor, not the view */
+        extern int g_in_mission, g_paused, g_map;
+        int look = g_in_mission && !g_paused && !g_map;   /* the Esc menu and the map computer drive a cursor, not the view */
         /* The game turns the view at most so far in one frame (about 250 counts): what a frame can't take is
            carried into the next one, so a fast swipe on a slow phone still turns all the way (a frame late)
            instead of being cut short. In cursor mode the motion goes through as it is. */

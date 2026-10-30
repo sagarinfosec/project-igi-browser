@@ -28,7 +28,7 @@ EXPORT uint32_t rc_watch_addr(void) { return (uint32_t)(uintptr_t)&g_watch; }
 /* 1 while the game draws a 3D world (a mission), 0 in its 2D menus (render_rec.c latches it per frame). The
    page's controls layer (web/controls.js) remaps mouse buttons and scales the look only in a mission, so the
    menus always get a plain click and cursor. */
-EXPORT int input_in_mission(void) { extern int g_in_mission, g_paused; return g_in_mission && !g_paused; }
+EXPORT int input_in_mission(void) { extern int g_in_mission, g_paused, g_map; return g_in_mission && !g_paused && !g_map; }
 /* 1 while the Esc menu is up over a mission (the game's clock stands still; render_rec.c) */
 EXPORT int input_paused(void) { extern int g_paused; return g_paused; }
 /* 1 when the mission's script has failed the level (the game then opens its menu with Resume greyed out;
@@ -285,6 +285,11 @@ EXPORT void input_mouse_button(int b, int down) {
    stick until changed). */
 void input_script_tick(uint32_t frame) {
     tap_tick();
+    {   /* RC_WATCH=frame:hexaddr (native debugging): arm a write watchpoint at that frame (host/watch.c) */
+        static int parsed; static uint32_t wf, wa;
+        if (!parsed) { parsed = 1; const char *w = getenv("RC_WATCH"); if (w) sscanf(w, "%u:%x", &wf, &wa); }
+        if (wa && frame == wf) { extern void watch_arm(uint32_t addr); fprintf(stderr, "[watch] arming %08x at frame %u\n", wa, frame); watch_arm(wa); }
+    }
     static const char *script = (const char *)1;
     static struct { uint32_t frame; int kind; uint8_t code; } pending[64];
     static int npending;

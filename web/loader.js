@@ -561,6 +561,41 @@ function setupControls() {
   renderMouse();
 }
 
+// Large subtitles: the engine reads the game's speech back from the glyphs it draws (host/subtitle.c,
+// rc_subtitle) and the page shows it in a readable caption over the top of the picture. The text is read from
+// the wasm memory directly (a NUL-terminated string); hidden after the game stops drawing it (with a short hold
+// so a flicker between two lines doesn't blink), and when the setting is off.
+function subtitles(M) {
+  const box = $('subcap');
+  if (!box || !M._rc_subtitle) return;
+  let last = '', lastSeen = 0;
+  const dec = new TextDecoder('latin1');
+  setInterval(() => {
+    let text = '';
+    try {
+      if (RcControls.get().subs) {
+        const p = M._rc_subtitle(), mem = new Uint8Array(M.wasmMemory.buffer, p, 512);
+        const end = mem.indexOf(0);
+        text = dec.decode(mem.slice(0, end < 0 ? 512 : end));
+      }
+    } catch { text = ''; }
+    const now = performance.now();
+    if (text) lastSeen = now;
+    if (text && text !== last) {
+      last = text;
+      box.textContent = '';
+      for (const line of text.split('\n')) {
+        const m = /^([A-Z][A-Z .]{0,22}):\s*(.*)$/.exec(line);
+        const p = document.createElement('div');
+        if (m) { const b = document.createElement('b'); b.textContent = m[1] + ': '; p.appendChild(b); p.appendChild(document.createTextNode(m[2])); }
+        else p.textContent = line;
+        box.appendChild(p);
+      }
+      box.classList.remove('hidden');
+    } else if (!text && last && now - lastSeen > 700) { last = ''; box.classList.add('hidden'); }
+  }, 150);
+}
+
 function hookInput(M, net) {
   const canvas = $('canvas');
   if (net) {
@@ -851,7 +886,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=18';
+  script.src = 'build/recomp.js?v=19';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -886,6 +921,7 @@ async function run(session) {
   M._rc_gpu_init(canvas.width, canvas.height);
   new ResizeObserver(() => { sizeCanvas(); M._rc_set_canvas_size(canvas.width, canvas.height); }).observe(canvas);
   hookInput(M, !!session);
+  subtitles(M);
   if (touch) { RcTouch.attach(M, $('stage'), canvas); followVisualViewport($('stage')); }
   if (session) { session.client.attach(M); showNetStatus(M, session); }
   crashWatch(M, touch);
@@ -1296,7 +1332,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp18.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp19.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

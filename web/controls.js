@@ -52,6 +52,7 @@ const RcControls = (() => {
     gyroInvY: false,    // gyroscope: tilt the phone up to look down (some players want it, as in flight games)
     gyroInvX: false,    // and turn left to look right
     wide: true,         // widescreen: the 3D world fills the whole screen (host rc_set_wide); false = 4:3 letterboxed
+    subs: true,         // large subtitles: the game's speech read back from its tiny font (host/subtitle.c) in a caption
   };
   let S = load();
   function load() {
@@ -61,7 +62,7 @@ const RcControls = (() => {
     for (const k of ['mouseSens', 'look', 'scopeSens', 'scopeZoom', 'gyroSens']) if (typeof saved[k] === 'number' && saved[k] > 0) s[k] = saved[k];
     if (['off', 'on', 'scope'].includes(saved.gyro)) s.gyro = saved.gyro;
     if (typeof saved.wide === 'boolean') s.wide = saved.wide;
-    for (const k of ['gyroInvY', 'gyroInvX']) if (typeof saved[k] === 'boolean') s[k] = saved[k];
+    for (const k of ['gyroInvY', 'gyroInvX', 'subs']) if (typeof saved[k] === 'boolean') s[k] = saved[k];
     if (saved.mouse) for (const b of [0, 1, 2]) if (ACTIONS[saved.mouse[b]]) s.mouse[b] = saved.mouse[b];
     return s;
   }
