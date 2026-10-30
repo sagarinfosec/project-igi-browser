@@ -733,7 +733,17 @@ static void rec_present_impl(Device *d) {
     { uint32_t t = R32(PROFILE_TICK);
       g_tick_still = (t == g_tick_last) ? g_tick_still + 1 : 0;
       g_tick_last = t;
-      g_paused = g_in_mission && g_tick_still >= 3; }
+#ifdef PROFILE_PAUSE_FLAG
+      /* The game's own control flag (0 in the Esc menu, in cutscenes, when dead) together with the level timer
+         standing still: the timer alone never runs in the last mission (always "paused"), the flag alone can stay 0
+         after a resume. Both say paused: paused. */
+      g_paused = g_in_mission && R32(PROFILE_PAUSE_FLAG) == 0 && g_tick_still >= 3;
+#else
+      g_paused = g_in_mission && g_tick_still >= 3;
+#endif
+      { static int logit = -1; if (logit < 0) logit = getenv("RC_TICK_LOG") != NULL;   /* RC_TICK_LOG=1: the pause detector's inputs */
+        if (logit && d->frame % 60 == 0) fprintf(stderr, "[tick] frame %u tick %u still %d world %d paused %d cand %x %x %x\n", d->frame, t, g_tick_still, g_in_mission, g_paused,
+                                                     R32(0x5468ccu), R32(0x5c8b24u), R32(0x5c8ba4u)); } }
 #endif
     if (getenv("RC_ZOOM_LOG") && g_zoom_this_frame != g_zoom) fprintf(stderr, "[zoom] frame %u: m11 %.5f\n", d->frame, g_zoom_this_frame);
     g_zoom = g_zoom_this_frame;

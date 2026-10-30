@@ -87,6 +87,14 @@ the engine aborted ("too many live COM objects") after ~16 min, which is what pl
 destroy routines in `host/dsound.c` (buffer + notify/3D views, shared sample memory) and `com_free` for texture
 views in `host/ddraw7.c`. `RC_COM_LOG=1` logs live counts per interface every 2048 creations.
 
+Pause detection (2026-10-30): the Esc-menu detector used the level timer (`PROFILE_TICK`) standing still, but the
+last mission never starts that timer, so there the page thought the game was paused the whole time: no look
+inversion (swipes felt inverted), the scope toggle refused (it needs a running mission) and taps were routed as
+menu taps. Snapshots taken playing and paused in missions 1 and 14 (`RC_MEMSNAP`, four each, then "constant in
+play, constant in pause, different between, same in both missions") found the game's control flag at 0x5468cc
+(`PROFILE_PAUSE_FLAG`: 9 with control, 0 in the Esc menu, cutscenes and when dead); it can stay 0 after a resume,
+so paused = flag 0 AND timer still. `RC_TICK_LOG=1` prints the detector's inputs every 60 frames.
+
 Testing switches: `RC_MEMSNAP=frame:addr:len:path`, `RC_POKE=frame:addr:hexbytes`, `RC_DUMP=frame:addr:len`
 (an address may be a pointer chain, `base>off>off`: each `>off` loads the dword so far and adds off, resolved
 at that frame — for objects on the heap), `RC_ZOOM_LOG=1`

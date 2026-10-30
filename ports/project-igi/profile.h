@@ -20,7 +20,10 @@
 #define PROFILE_CURSOR2_Y  0x00684304u
 /* Game time: a counter that advances every frame while the game plays and stands still while it is paused
    (the Esc menu over the 3D world). The host tells mouse-look from menu-cursor mode by it (render_rec.c). */
-#define PROFILE_TICK       0x00a44398u
+#define PROFILE_TICK       0x00a44398u   /* the level timer: stands still in the Esc menu, but never runs in the last mission */
+/* the game's control flag (found 2026-10-30 by diffing snapshots taken
+   playing and paused in missions 1 and 14; preferred over the timer, which the last mission never starts) */
+#define PROFILE_PAUSE_FLAG 0x005468ccu   /* 9 while the player has control; 0 in the Esc menu, in cutscenes and when dead */
 /* The mission's LevelFlow task object (a pointer, set while a mission is loaded): byte +0x60 is "level
    completed", +0x61 "level failed" (the script's Complete / Failed expressions, evaluated every tick). On a
    failed level the game opens its menu by itself with Resume greyed out; the page says so (host/input.c). */
