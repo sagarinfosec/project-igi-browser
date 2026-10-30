@@ -1113,13 +1113,18 @@ async function boot() {
     return;
   }
   if (!crossOriginIsolated) { status('This browser can’t run the game yet — it’s missing a feature the game needs (cross-origin isolation). ' + needHint); return; }
-  if (!navigator.gpu) { status('This browser doesn’t support WebGPU, which the game needs for graphics. ' + needHint); return; }
+  // Count the visitors the game can't start for, and on what (crash.php type nowebgpu / nogpu): the size of
+  // the audience a second renderer (WebGL) would reach. Device model is in the user agent on Android.
+  const cannot = (type) => { try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 20, type, ua: navigator.userAgent, mem: navigator.deviceMemory || 0,
+    cores: navigator.hardwareConcurrency || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` })], { type: 'application/json' })); } catch { /* no beacon */ } };
+  if (!navigator.gpu) { cannot('nowebgpu'); status('This browser doesn’t support WebGPU, which the game needs for graphics. ' + needHint); return; }
   // navigator.gpu can exist with no usable adapter (GPU or driver blocklisted, hardware acceleration off,
   // Remote Desktop / VM): say so instead of starting a game that can only show a black screen
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null) ||
     await navigator.gpu.requestAdapter().catch(() => null) ||
     await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null);
   if (!adapter) {
+    cannot('nogpu');
     const firefox = /Firefox\//.test(navigator.userAgent);
     status('WebGPU is switched on in this browser but it found no usable graphics adapter. ' +
       (firefox ? 'Firefox only enables WebGPU for some GPUs and drivers (see about:support, "WebGPU"); Chrome or Edge usually work. '
