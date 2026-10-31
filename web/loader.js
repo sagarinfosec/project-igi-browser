@@ -46,8 +46,8 @@ const COHORT = (() => {
 // Rates per cohort are unaffected (a browser sends all of its events or none).
 const SAMPLED = COHORT.tag !== 'base' || COHORT.bucket % 4 === 0;
 const beacon = (type, extra) => {
-  if ((type === 'start' || type === 'play') && !SAMPLED) return;
-  try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, ua: navigator.userAgent,
+  if ((type === 'start' || type === 'play') && !SAMPLED && window.RC_RENDERER !== 'gl') return;   // the WebGL players: all of them, to judge the new renderer
+  try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, r: window.RC_RENDERER || 'gpu', ua: navigator.userAgent,
     mem: navigator.deviceMemory || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` }, extra || {}))], { type: 'application/json' })); } catch { /* no beacon */ }
 };
 const OPFS_DIR = 'rcgame';
@@ -1012,7 +1012,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=23';
+  script.src = 'build/recomp.js?v=24';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -1024,9 +1024,11 @@ async function run(session) {
       if (params.has('log')) m.ENV.RC_LOG = '1';
       if (params.has('pads')) m.ENV.RC_PADS = params.get('pads');
       if (params.has('input')) m.ENV.RC_INPUT = params.get('input');   // testing: scripted input (host/input.c)
-      if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';
+      if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';                // testing: the game's poll spins unyielded (host/user32.c)
       if (params.has('gpucompat')) m.ENV.RC_GPU_COMPAT = '1';            // testing: a WebGPU compatibility-mode device
-      if (params.has('gpuloop')) m.ENV.RC_GPU_LOOP = '1';                // testing: every new device after a loss arrives lost               // testing: the game's poll spins unyielded (host/user32.c)
+      if (params.has('gpuloop')) m.ENV.RC_GPU_LOOP = '1';                // testing: every new device after a loss arrives lost
+      if (params.has('glprof')) m.ENV.RC_GL_PROF = '1';                  // testing: time per WebGL command type
+      if (params.has('nobc')) m.ENV.RC_NO_BC = '1';                      // testing: no compressed textures (as most phones under WebGL)
       // Widescreen display modes (host/ddraw7.c) only when asked (?widemodes): the game runs in its original 4:3
       // modes everywhere, as it did until 2026-10-30; black screens on phones and desktops followed the switch.
       if (COHORT.on.wide) m.ENV.RC_WIDE_DISPLAY = '1';   // the wide experiment (A/B, see COHORT)
@@ -1049,7 +1051,9 @@ async function run(session) {
     }],
   });
   const canvas = $('canvas');
-  M._rc_gpu_init(canvas.width, canvas.height);
+  if (window.RC_RENDERER === 'gl') {
+    if (!M._rc_gl_init(canvas.width, canvas.height)) throw new Error('WebGL 2 could not start on this device.');
+  } else M._rc_gpu_init(canvas.width, canvas.height);
   new ResizeObserver(() => { sizeCanvas(); M._rc_set_canvas_size(canvas.width, canvas.height); }).observe(canvas);
   hookInput(M, !!session);
   subtitles(M, touch);
@@ -1302,16 +1306,26 @@ async function boot() {
   // the audience a second renderer (WebGL) would reach. Device model is in the user agent on Android.
   const cannot = (type) => { try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify({ v: 21, x: COHORT.tag, type, ua: navigator.userAgent, mem: navigator.deviceMemory || 0,
     cores: navigator.hardwareConcurrency || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` })], { type: 'application/json' })); } catch { /* no beacon */ } };
-  if (!navigator.gpu) { cannot('nowebgpu'); status('This browser doesn’t support WebGPU, which the game needs for graphics. ' + needHint); return; }
+  // Renderer: WebGPU when the browser has a usable adapter, else WebGL 2 (render_gl.c), which reaches older iPhones
+  // and the Android phones and PCs whose GPU Chrome keeps off WebGPU. ?renderer=gl forces WebGL 2 (testing).
+  const webgl2 = () => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } };
+  if (params.get('renderer') === 'gl' && webgl2()) { window.RC_RENDERER = 'gl'; }
+  else if (!navigator.gpu) {
+    cannot('nowebgpu');
+    if (webgl2()) window.RC_RENDERER = 'gl';
+    else { status('This browser doesn’t support WebGPU or WebGL 2, which the game needs for graphics. ' + needHint); return; }
+  }
   // navigator.gpu can exist with no usable adapter (GPU or driver blocklisted, hardware acceleration off,
   // Remote Desktop / VM): say so instead of starting a game that can only show a black screen
   // (featureLevel 'compatibility': WebGPU on OpenGL ES 3.1, Chrome 146+, for phones without full WebGPU; the engine
   // asks in the same order, host/render_wgpu.c request_web_adapter)
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null) ||
+  const adapter = window.RC_RENDERER === 'gl' ? { gl: 1 } : params.has('noadapter') ? null :   // ?noadapter: testing the fallback
+    await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null) ||
     await navigator.gpu.requestAdapter().catch(() => null) ||
     await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' }).catch(() => null) ||
     await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null);
-  if (!adapter) {
+  if (!adapter && webgl2()) { cannot('nogpu'); window.RC_RENDERER = 'gl'; }
+  else if (!adapter) {
     cannot('nogpu');
     const firefox = /Firefox\//.test(navigator.userAgent);
     // Chrome switches graphics off for a site after the graphics process crashed while it was open, until the
@@ -1324,7 +1338,7 @@ async function boot() {
       'Remote Desktop and virtual machines often have no GPU for the browser.');
     return;
   }
-  if (adapter.isFallbackAdapter || adapter.info?.isFallbackAdapter)
+  if (adapter && !adapter.gl && (adapter.isFallbackAdapter || adapter.info?.isFallbackAdapter))
     console.warn('WebGPU: only a software (fallback) adapter is available; the game will be slow');
   if (!navigator.storage?.getDirectory) { status('This browser has no Origin Private File System.'); return; }
   let onlineReady = false;
@@ -1527,7 +1541,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp23.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp24.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

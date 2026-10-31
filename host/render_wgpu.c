@@ -1232,6 +1232,9 @@ void web_queue_chunk(uint8_t *buf, size_t len, int ends_frame) {
 }
 int web_queued_frames(void) { return __atomic_load_n(&g_q_frames, __ATOMIC_ACQUIRE); }
 int web_gpu_ready(void) { return __atomic_load_n(&g_ready, __ATOMIC_ACQUIRE); }
+void web_set_ready(int on) { __atomic_store_n(&g_ready, on, __ATOMIC_RELEASE); }   /* render_gl.c */
+extern int g_use_gl;   /* render_gl.c: the WebGL 2 executor runs the commands instead */
+void gl_exec(const CmdHdr *h);
 
 static void on_rb_mapped(WGPUMapAsyncStatus st, WGPUStringView msg, void *u1, void *u2) {
     (void)msg; (void)u1; (void)u2;
@@ -1251,6 +1254,7 @@ static int run_chunk(Chunk *ch) {
         const CmdHdr *h = (const CmdHdr *)(ch->buf + ch->off);
         ch->off += h->size;
         g_watch.page_phase = 10 + (int)h->type;
+        if (g_use_gl) { gl_exec(h); continue; }
         switch (h->type) {
         case CMD_TARGET: exec_target((const CmdTarget *)h); break;
         case CMD_CLEAR: exec_clear((const CmdClear *)h); break;

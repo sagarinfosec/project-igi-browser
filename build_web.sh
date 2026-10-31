@@ -34,11 +34,11 @@ done
 emcc $CFLAGS $PFLAG -DRC_NODE_BUILD -Iruntime -Ihost -c host/main.c -o "$B/main_node.o"
 HOST_WEB=$(ls "$B"/host/*.o)
 emcc $CFLAGS -c web/node_stubs.c -o "$B/node_stubs.o"
-HOST_NODE="$(ls "$B"/host/*.o | grep -v '/main.o$' | grep -v '/render_wgpu.o$') $B/node_stubs.o"
+HOST_NODE="$(ls "$B"/host/*.o | grep -v '/main.o$' | grep -v '/render_wgpu.o$' | grep -v '/render_gl.o$') $B/node_stubs.o"
 
 # Browser build: page thread renders (WebGPU), game files from OPFS, modular loader for loader.js
 emcc -pthread ${LINKOPT:-$OPT} --profiling-funcs -o "$B/www/recomp.js" "$B"/runtime.o "$B"/interp.o $HOST_WEB "$B"/obj/*.o \
-    --use-port=emdawnwebgpu -sWASMFS -sPROXY_TO_PTHREAD -sPTHREAD_POOL_SIZE=12 -sALLOW_MEMORY_GROWTH \
+    --use-port=emdawnwebgpu -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2 -sWASMFS -sPROXY_TO_PTHREAD -sPTHREAD_POOL_SIZE=12 -sALLOW_MEMORY_GROWTH \
     -sMAXIMUM_MEMORY=2GB -Wl,--wrap=sbrk -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=32MB -sENVIRONMENT=web,worker \
     -sMODULARIZE -sEXPORT_NAME=createRecomp -sEXPORTED_RUNTIME_METHODS=ENV,wasmMemory -sEXIT_RUNTIME=0 $EXTRA_LINK
 # Firefox rejects any typed array over 2 GB as setBindGroup's dynamic offsets, and the bindings pass a view of

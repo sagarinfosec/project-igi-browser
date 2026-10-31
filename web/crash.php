@@ -37,7 +37,7 @@ $row = array('at' => gmdate('Y-m-d H:i:s'));
 // worker, and answered again), stall / stallend (frames stopped in a running mission); dur in seconds; pp/gp
 // the page and game thread phases, frames/gf/beat/io counters, wasm the memory size in MB (host/win32.h RcWatch)
 foreach (array('v', 'type', 'ua', 'mem', 'cores', 'played', 'gap', 'dur', 'mission', 'paused', 'touch', 'bg', 'nav', 'screen',
-               'pp', 'gp', 'frames', 'queued', 'gf', 'beat', 'io', 'wasm', 'lt', 'fps', 'rb', 'msg', 'page', 'gpu', 'x', 'booted', 'play', 'expoff', 't', 'n', 'final') as $k) {
+               'pp', 'gp', 'frames', 'queued', 'gf', 'beat', 'io', 'wasm', 'lt', 'fps', 'rb', 'msg', 'page', 'gpu', 'x', 'booted', 'play', 'expoff', 't', 'n', 'final', 'r') as $k) {
     if (!isset($d[$k])) continue;
     $row[$k] = is_string($d[$k]) ? substr($d[$k], 0, 300) : (is_numeric($d[$k]) ? $d[$k] + 0 : null);
 }

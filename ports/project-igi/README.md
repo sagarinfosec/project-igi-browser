@@ -123,6 +123,13 @@ dialog covers the browser; ~5-10% of sessions ended there) the next `rc_gpu_pump
 device, requests a new adapter and device, rebuilds, and bumps `g_gpu_gen` (render_rec.c) so every texture is sent
 again from guest memory. Tested with DevTools `Browser.crashGpuProcess`: restored in 0.2 s, textures intact.
 
+WebGL 2 renderer (2026-10-31, `host/render_gl.c`): a second executor for the same commands, used when WebGPU is
+missing or gives no adapter (about a quarter of the visitors who tried that day). Rows top first (clip y negated,
+flipped blit at present), clip z mapped to OpenGL's range, `glFrontFace(GL_CCW)` for Direct3D's clockwise fronts,
+fixed function only, S3TC when the browser has it. Draws are batched: vertices and uniforms staged in host memory and
+uploaded once per batch (`glBufferSubData` per draw ran at 1.5 fps). Test switches: `?renderer=gl`, `?noadapter`
+(simulates WebGPU without an adapter), `?nobc`, `?glprof`. Every report carries `r` (gpu / gl).
+
 Testing switches: `RC_WATCH=frame:hexaddr` (native write watchpoint from that frame), `RC_MEMSNAP=frame:addr:len:path`, `RC_POKE=frame:addr:hexbytes`, `RC_DUMP=frame:addr:len`
 (an address may be a pointer chain, `base>off>off`: each `>off` loads the dword so far and adds off, resolved
 at that frame — for objects on the heap), `RC_ZOOM_LOG=1`
