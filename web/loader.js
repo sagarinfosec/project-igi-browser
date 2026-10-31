@@ -1107,9 +1107,13 @@ async function run(session) {
   // lines and any errors, once. Set here, not after the engine loads: on iOS 16 the page never got that far.
   const boot = { phase: 'start', at: performance.now(), done: false };
   const bootPhase = (p) => { boot.phase = p; boot.at = performance.now(); keepLog('[boot] ' + p); };
-  if (!session) setTimeout(() => { if (!boot.done) gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu',
-    n: boot.phase + ' ' + Math.round((performance.now() - boot.at) / 1000) + 's',
-    msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); }, 8000);
+  // also when the page goes away first (players reloaded 4 s after Play on iOS 16)
+  const bootReport = (why) => { if (boot.done || boot.sent || session) return; boot.sent = true;
+    gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu',
+      n: why + ' ' + boot.phase + ' ' + Math.round((performance.now() - boot.at) / 1000) + 's',
+      msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); };
+  setTimeout(() => bootReport('8s'), 8000);
+  addEventListener('pagehide', () => bootReport('left'));
   const touch = !session && RcTouch.wanted();
   if (touch) RcTouch.goFullscreen($('stage'));   // also needs the gesture
   else if (!session) setupFullscreen.enter?.();   // desktop too: the game fills the screen (Esc kept for its menu; Alt+Enter leaves)
