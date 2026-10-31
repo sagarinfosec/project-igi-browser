@@ -920,6 +920,12 @@ window.rcDeviceLost = (msg, n) => {
   };
   gpuFailTimer = setTimeout(check, 1000);
 };
+// WebGL sessions report once what the renderer saw (render_gl.c gl_diag_frame): GPU, GL errors, back-buffer brightness
+window.rcGlRenderer = () => {   // the GPU's real name, where the browser tells it
+  try { const gl = $('canvas').getContext('webgl2'); const e = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        return e ? String(gl.getParameter(e.UNMASKED_RENDERER_WEBGL)) : ''; } catch { return ''; }
+};
+window.rcGlDiag = (json) => { try { console.warn('[gl] diag', json); gpuBeacon('gldiag', { msg: String(json).slice(0, 300) }); } catch { /* no beacon */ } };
 window.rcDeviceRestored = (n) => {
   const ms = gpuLostAt ? Math.round(performance.now() - gpuLostAt) : 0;
   gpuLostAt = 0; clearTimeout(gpuFailTimer);
@@ -1012,7 +1018,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=24';
+  script.src = 'build/recomp.js?v=25';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -1541,7 +1547,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp24.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp25.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

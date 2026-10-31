@@ -76,13 +76,12 @@ static const char *FS =
 "in vec4 v_dif; in vec4 v_spc; in vec4 v_tc0; in vec4 v_tc1;\n"
 "out vec4 o_color;\n"
 "vec4 sat(vec4 v) { return clamp(v, vec4(0.0), vec4(1.0)); }\n"
+"// no switch statements: some phone GPU drivers miscompile switch on unsigned integers\n"
 "bool alpha_ok(float a) {\n"
-"  float r = u.misc.x;\n"
-"  switch (u.flags.y) {\n"
-"    case 1u: return false; case 2u: return a < r; case 3u: return abs(a - r) < 0.002;\n"
-"    case 4u: return a <= r; case 5u: return a > r; case 6u: return abs(a - r) >= 0.002;\n"
-"    case 7u: return a >= r; default: return true;\n"
-"  }\n"
+"  float r = u.misc.x; uint f = u.flags.y;\n"
+"  if (f == 1u) return false; if (f == 2u) return a < r; if (f == 3u) return abs(a - r) < 0.002;\n"
+"  if (f == 4u) return a <= r; if (f == 5u) return a > r; if (f == 6u) return abs(a - r) >= 0.002;\n"
+"  if (f == 7u) return a >= r; return true;\n"
 "}\n"
 "vec4 arg(uint a, vec4 cur, vec4 tex, vec4 dif, vec4 spc) {\n"
 "  vec4 v = cur;\n"
@@ -93,23 +92,21 @@ static const char *FS =
 "  return v;\n"
 "}\n"
 "vec4 top(uint o, vec4 a0, vec4 a1, vec4 a2, vec4 cur, vec4 tex, vec4 dif) {\n"
-"  switch (o) {\n"
-"    case 2u: return a1;  case 3u: return a2;\n"
-"    case 4u: return a1 * a2;  case 5u: return a1 * a2 * 2.0;  case 6u: return a1 * a2 * 4.0;\n"
-"    case 7u: return a1 + a2;  case 8u: return a1 + a2 - 0.5;  case 9u: return (a1 + a2 - 0.5) * 2.0;\n"
-"    case 10u: return a1 - a2;  case 11u: return a1 + a2 - a1 * a2;\n"
-"    case 12u: return mix(a2, a1, dif.a);  case 13u: return mix(a2, a1, tex.a);\n"
-"    case 14u: return mix(a2, a1, u.tfactor.a);  case 15u: return a1 + a2 * (1.0 - tex.a);\n"
-"    case 16u: return mix(a2, a1, cur.a);\n"
-"    case 18u: return vec4(a1.rgb + a1.a * a2.rgb, a1.a);\n"
-"    case 19u: return vec4(a1.rgb * a2.rgb + vec3(a1.a), a1.a);\n"
-"    case 20u: return vec4((1.0 - a1.a) * a2.rgb + a1.rgb, a1.a);\n"
-"    case 21u: return vec4((vec3(1.0) - a1.rgb) * a2.rgb + vec3(a1.a), a1.a);\n"
-"    case 24u: { float d = clamp(dot(a1.rgb - 0.5, a2.rgb - 0.5) * 4.0, 0.0, 1.0); return vec4(d); }\n"
-"    case 25u: return a0 + a1 * a2;\n"
-"    case 26u: return a0 * a1 + (vec4(1.0) - a0) * a2;\n"
-"    default: return a1;\n"
-"  }\n"
+"  if (o == 2u) return a1;  if (o == 3u) return a2;\n"
+"  if (o == 4u) return a1 * a2;  if (o == 5u) return a1 * a2 * 2.0;  if (o == 6u) return a1 * a2 * 4.0;\n"
+"  if (o == 7u) return a1 + a2;  if (o == 8u) return a1 + a2 - 0.5;  if (o == 9u) return (a1 + a2 - 0.5) * 2.0;\n"
+"  if (o == 10u) return a1 - a2;  if (o == 11u) return a1 + a2 - a1 * a2;\n"
+"  if (o == 12u) return mix(a2, a1, dif.a);  if (o == 13u) return mix(a2, a1, tex.a);\n"
+"  if (o == 14u) return mix(a2, a1, u.tfactor.a);  if (o == 15u) return a1 + a2 * (1.0 - tex.a);\n"
+"  if (o == 16u) return mix(a2, a1, cur.a);\n"
+"  if (o == 18u) return vec4(a1.rgb + a1.a * a2.rgb, a1.a);\n"
+"  if (o == 19u) return vec4(a1.rgb * a2.rgb + vec3(a1.a), a1.a);\n"
+"  if (o == 20u) return vec4((1.0 - a1.a) * a2.rgb + a1.rgb, a1.a);\n"
+"  if (o == 21u) return vec4((vec3(1.0) - a1.rgb) * a2.rgb + vec3(a1.a), a1.a);\n"
+"  if (o == 24u) { float d = clamp(dot(a1.rgb - 0.5, a2.rgb - 0.5) * 4.0, 0.0, 1.0); return vec4(d); }\n"
+"  if (o == 25u) return a0 + a1 * a2;\n"
+"  if (o == 26u) return a0 * a1 + (vec4(1.0) - a0) * a2;\n"
+"  return a1;\n"
 "}\n"
 "vec4 stage(uvec4 s, uvec4 sb, vec4 cur, vec4 tex, vec4 dif, vec4 spc) {\n"
 "  vec4 c0 = arg(sb.w & 255u, cur, tex, dif, spc);\n"
@@ -137,13 +134,30 @@ static const char *FS =
 "  o_color = cur;\n"
 "}\n";
 
+/* Present: the back buffer drawn onto the canvas as one textured triangle (rows top first -> flipped), instead of
+   glBlitFramebuffer, whose format rules some phone GPUs handle badly (Android players saw a black screen while
+   the frames were being drawn, 2026-10-31). */
+static const char *PVS =
+"#version 300 es\n"
+"out vec2 v_uv;\n"
+"void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
+"  v_uv = vec2(p.x, 1.0 - p.y); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+static const char *PFS =
+"#version 300 es\n"
+"precision mediump float;\n"
+"uniform sampler2D bb; in vec2 v_uv; out vec4 o;\n"
+"void main() { o = vec4(texture(bb, v_uv).rgb, 1.0); }\n";
+
 /* ------------------------------------------------------------------ state */
 
 typedef struct { GLuint tex; uint32_t w, h, levels, fmt; } LTex;
 typedef struct { GLuint tex, rb; uint32_t w, h; int depth, gpu_dirty; } LSurf;   /* color: texture; depth: renderbuffer */
 
 static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE g_ctx;
-static GLuint g_prog, g_vao, g_vbo, g_ubo;
+static GLuint g_prog, g_vao, g_vbo, g_ubo, g_pprog, g_pvao, g_psamp;
+/* field diagnostics (sent once per session through rcGlDiag): the first GL errors and whether frames are black */
+static unsigned g_diag_frames; static int g_diag_err[4], g_diag_errcmd[4], g_diag_nerr, g_diag_sent;
+static char g_diag_log[200];
 static GLint g_ubo_align = 256;
 static uint32_t g_vpos, g_upos;
 #define LVBUF_SIZE (16u << 20)
@@ -244,7 +258,10 @@ static GLuint compile(GLenum type, const char *src) {
     glCompileShader(s);
     GLint ok = 0;
     glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) { char log[2048]; glGetShaderInfoLog(s, sizeof log, NULL, log); fprintf(stderr, "[gl] shader error: %s\n", log); }
+    if (!ok) {
+        char log[2048]; glGetShaderInfoLog(s, sizeof log, NULL, log); fprintf(stderr, "[gl] shader error: %s\n", log);
+        if (!g_diag_log[0]) snprintf(g_diag_log, sizeof g_diag_log, "shader: %.180s", log);
+    }
     return s;
 }
 
@@ -332,6 +349,24 @@ EMSCRIPTEN_KEEPALIVE int rc_gl_init(int w, int h) {
     glEnableVertexAttribArray(3); glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, st, (void *)24);
     glEnableVertexAttribArray(4); glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, st, (void *)40);
 
+    /* the present program */
+    {
+        GLuint pv = compile(GL_VERTEX_SHADER, PVS), pf = compile(GL_FRAGMENT_SHADER, PFS);
+        g_pprog = glCreateProgram();
+        glAttachShader(g_pprog, pv); glAttachShader(g_pprog, pf);
+        glLinkProgram(g_pprog);
+        glGetProgramiv(g_pprog, GL_LINK_STATUS, &ok);
+        if (!ok) { char log[1024]; glGetProgramInfoLog(g_pprog, sizeof log, NULL, log); fprintf(stderr, "[gl] present link error: %s\n", log); }
+        glUseProgram(g_pprog);
+        glUniform1i(glGetUniformLocation(g_pprog, "bb"), 0);
+        glUseProgram(g_prog);
+        glGenVertexArrays(1, &g_pvao);
+        glGenSamplers(1, &g_psamp);
+        glSamplerParameteri(g_psamp, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glSamplerParameteri(g_psamp, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glSamplerParameteri(g_psamp, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glSamplerParameteri(g_psamp, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
     make_solid_gl(&g_lwhite, 255);
     make_solid_gl(&g_lblack, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -521,6 +556,7 @@ static void gl_upload_surf(const CmdUploadSurf *c) {
 }
 
 static void gl_flush(void);
+static void gl_diag_frame(void);
 static void gl_draw(const CmdDraw *c) {
     begin_frame_gl();
     uint32_t n = c->nverts, bytes = n * (uint32_t)sizeof(CVert);
@@ -593,6 +629,8 @@ static void gl_draw(const CmdDraw *c) {
 /* the recorded draws to the GPU (see DrawRec) */
 static void gl_flush(void) {
     if (!g_nrecs) return;
+    glUseProgram(g_prog);
+    glBindVertexArray(g_vao);
     glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
     glBufferData(GL_ARRAY_BUFFER, g_vpos, g_vstage, GL_STREAM_DRAW);
     glBindBuffer(GL_UNIFORM_BUFFER, g_ubo);
@@ -663,19 +701,51 @@ static void gl_readback(const CmdReadback *c) {
     __atomic_store_n((volatile int *)(uintptr_t)c->done_ptr, 1, __ATOMIC_RELEASE);
 }
 
+/* Once per session, ~150 frames in: the GPU's name, the first GL errors, and how bright the back buffer's middle is
+   (0 = black: the drawing fails; >0 with a black screen: the presenting fails). The page sends it to crash.php. */
+static void gl_diag_frame(void) {
+    if (g_diag_sent || ++g_diag_frames < 150) return;
+    g_diag_sent = 1;
+    uint8_t px[32 * 32 * 4];
+    bind_fbo(g_bb_fbo);
+    glReadPixels(g_bb_w / 2 - 16, g_bb_h / 2 - 16, 32, 32, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    unsigned sum = 0, maxv = 0;
+    for (int i = 0; i < 32 * 32; i++) { unsigned v = px[4 * i] + px[4 * i + 1] + px[4 * i + 2]; sum += v; if (v > maxv) maxv = v; }
+    GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    const char *ren = (const char *)glGetString(GL_RENDERER);
+    char *dbg = (char *)EM_ASM_PTR({ return stringToNewUTF8(typeof rcGlRenderer === 'function' ? rcGlRenderer() : ''); });
+    char json[512];
+    snprintf(json, sizeof json, "{\"gpu\":\"%.80s\",\"ren\":\"%.40s\",\"avg\":%u,\"max\":%u,\"fbo\":%u,\"bc\":%d,\"errs\":\"%x/%d %x/%d %x/%d\",\"n\":%d,\"log\":\"%.120s\",\"win\":\"%dx%d\"}",
+             dbg ? dbg : "", ren ? ren : "", sum / (32 * 32), maxv, (unsigned)st, g_gpu_bc, g_diag_err[0], g_diag_errcmd[0], g_diag_err[1], g_diag_errcmd[1],
+             g_diag_err[2], g_diag_errcmd[2], g_diag_nerr, g_diag_log, g_bb_w, g_bb_h);
+    for (char *q = json; *q; q++) if (*q == '\n' || *q == '\r') *q = ' ';
+    free(dbg);
+    fprintf(stderr, "[gl] diag %s\n", json);
+    EM_ASM({ if (typeof rcGlDiag === 'function') rcGlDiag(UTF8ToString($0)); }, json);
+}
+
 static void gl_present(const CmdPresent *c) {
     (void)c;
     begin_frame_gl();
     use_backbuffer_gl();
     g_frame_open_gl = 0;
-    /* the back buffer (rows top first) to the canvas (rows bottom first): a flipped blit */
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, g_bb_fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glDisable(GL_SCISSOR_TEST);
+    gl_diag_frame();
+    /* the back buffer (rows top first) onto the canvas: one textured triangle, flipped (see PVS) */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    g_cur_fbo = 0;
+    glViewport(0, 0, g_bb_w, g_bb_h);
+    glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
     glColorMask(1, 1, 1, 1);
-    glBlitFramebuffer(0, 0, g_bb_w, g_bb_h, 0, g_bb_h, g_bb_w, 0, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, g_bb_fbo);
-    g_cur_fbo = g_bb_fbo;
+    glUseProgram(g_pprog);
+    glBindVertexArray(g_pvao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_bb_tex);
+    glBindSampler(0, g_psamp);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindSampler(0, 0);
+    glBindVertexArray(g_vao);
+    glUseProgram(g_prog);
+    bind_fbo(g_bb_fbo);
     static unsigned frames;
     if (++frames % 120 == 0) {
         GLenum e = glGetError();
@@ -688,6 +758,12 @@ static double g_prof_t[16]; static unsigned g_prof_n[16];
 void gl_exec_inner(const CmdHdr *h);
 void gl_exec(const CmdHdr *h) {
     static int prof = -1; if (prof < 0) prof = getenv("RC_GL_PROF") != NULL;
+    if (!g_diag_sent) {   /* the first frames: note GL errors and which command raised them */
+        gl_exec_inner(h);
+        GLenum e = glGetError();
+        if (e != GL_NO_ERROR) { if (g_diag_nerr < 4) { g_diag_err[g_diag_nerr] = (int)e; g_diag_errcmd[g_diag_nerr] = (int)h->type; } g_diag_nerr++; }
+        return;
+    }
     if (!prof) { gl_exec_inner(h); return; }
     double t = emscripten_get_now();
     gl_exec_inner(h);
