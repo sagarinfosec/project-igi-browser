@@ -183,6 +183,15 @@ function hideLoading() {
   if (b) b.classList.add('hidden');
 }
 
+// The last lines the engine and the page printed, and the page's errors, kept for a start that shows no frame
+// (bootlog, run()): older iPhones and iPads (iOS 16-17) pressed Play and the game never appeared, without a word.
+const recentLog = [], recentErr = [];
+const keepLog = (t) => { recentLog.push(String(t).slice(0, 140)); if (recentLog.length > 14) recentLog.shift(); };
+const keepErr = (t) => { if (recentErr.length < 6) recentErr.push(String(t).slice(0, 160)); keepLog(t); };
+window.addEventListener('error', (e) => keepErr('ERR ' + e.message + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno));
+window.addEventListener('unhandledrejection', (e) => keepErr('REJ ' + ((e.reason && (e.reason.message || e.reason)) || '')));
+{ const ce = console.error; console.error = (...a) => { keepErr('CE ' + a.map(String).join(' ')); ce.apply(console, a); }; }
+
 // On-screen diagnostics for phones (no devtools): ?debug shows a log overlay capturing errors, warnings,
 // unhandled rejections and lost-GPU events, so a remote tester can screenshot exactly what failed (e.g. a
 // mission that won't load). Harmless when off.
@@ -1112,8 +1121,8 @@ async function run(session) {
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
-    print: (t) => console.log(t),
-    printErr: (t) => console.log(t),
+    print: (t) => { keepLog(t); console.log(t); },
+    printErr: (t) => { keepLog(t); console.log(t); },
     preRun: [(m) => {
       if (params.has('mute')) m.ENV.RC_NO_AUDIO = '1';
       if (params.get('exe')) m.ENV.RC_EXE = params.get('exe');
@@ -1167,6 +1176,9 @@ async function run(session) {
   let due = 0, booted = false, shownFrames = 0, lastPresent = 0, loading = false;
   const launchT = performance.now();
   setTimeout(() => { if (!booted) beacon('noframe', { touch: touch ? 1 : 0, n: shownFrames, t: 120 }); }, 120000);
+  // no frame 12 s after Play: what the engine said last, and any errors (once; the page may be killed before 120 s)
+  setTimeout(() => { if (!booted && !session) gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu', n: shownFrames,
+    msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); }, 12000);
   // Picture check: players reported a black screen after Play with the game running behind it (frames
   // presented, nothing visible). Once the boot cover is off, every 15th presented frame is copied small onto a 2D
   // canvas in the same task as the present (the canvas still holds it then) and its lit pixels counted. A
