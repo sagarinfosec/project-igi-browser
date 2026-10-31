@@ -354,6 +354,7 @@ const RcTouch = (() => {
           <div class="ts-seg" data-k="wide">
             <button type="button" data-v="1">Full screen (wide)</button><button type="button" data-v="0">Original 4:3</button>
           </div></div>
+        <p class="ts-wide-note hidden" style="margin:-4px 0 8px;font-size:12px;opacity:.8">Full screen starts with the next start of the game: reload the page and press Play.</p>
         <div class="ts-foot">
           <button type="button" class="ts-guide">How to play</button>
           <button type="button" class="ts-reset">Reset</button>
@@ -371,6 +372,7 @@ const RcTouch = (() => {
       for (const b of sheet.querySelectorAll('.ts-seg[data-k="gyro"] button')) b.classList.toggle('on', b.dataset.v === s.gyro);
       for (const b of sheet.querySelectorAll('.ts-seg[data-k="scopeZoom"] button')) b.classList.toggle('on', Number(b.dataset.v) === s.scopeZoom);
       for (const b of sheet.querySelectorAll('.ts-seg[data-k="wide"] button')) b.classList.toggle('on', (b.dataset.v === '1') === s.wide);
+      sheet.querySelector('.ts-wide-note').classList.toggle('hidden', !(s.wide && window.RC_WIDE_RUNNING === false));
       const note = sheet.querySelector('#ts-gyro-note'), st = C.gyroState();
       note.textContent = s.gyro === 'off' ? 'Turn the phone to aim, like PUBG. Needs a gyroscope.'
         : st === 'denied' ? 'Motion access was refused. Allow it in the browser\'s site settings, then try again.'

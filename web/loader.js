@@ -24,7 +24,7 @@ const params = new URLSearchParams(location.search);
 // share, so a change can go to a few percent of players first and its reports (crash.php, field "x") be compared
 // with everyone else's before it goes further. A browser whose run in an experiment ended badly (no frame, or
 // killed within two minutes) leaves that experiment for good (crashCheck). URL switches force either way.
-const EXPERIMENTS = { wide: 10, compact: 0 };   // percent of browsers (2026-10-31: wide display modes at 10%)
+const EXPERIMENTS = { wide: 50, compact: 0 };   // percent of browsers (wide display modes: 10% 2026-10-30, 50% 2026-10-31)
 const COHORT = (() => {
   let b = 99, off = {};
   try {
@@ -34,12 +34,30 @@ const COHORT = (() => {
   } catch { b = 99; }
   const on = {};
   for (const [k, pct] of Object.entries(EXPERIMENTS)) on[k] = !off[k] && b < pct;
+  // the player's own choice in the settings (controls.js) wins over the bucket: "Full screen (wide)" or "Original 4:3"
+  let choice = null;
+  try { choice = localStorage.getItem('igi-wide-choice'); } catch { /* storage blocked */ }
+  if (choice === '1') on.wide = true;
+  if (choice === '0') on.wide = false;
   if (params.has('widemodes')) on.wide = true;
   if (params.has('nowidemodes')) on.wide = false;
   if (params.get('mem') === 'compact') on.compact = true;
   if (params.get('mem') === 'full') on.compact = false;
-  return { bucket: b, on, tag: Object.keys(on).filter((k) => on[k]).join('+') || 'base' };
+  // a chosen setting is tagged apart (+pick), so the bucketed comparison stays between like and like
+  return { bucket: b, on, tag: (Object.keys(on).filter((k) => on[k]).join('+') || 'base') + (choice !== null ? '+pick' : '') };
 })();
+// the settings show the screen the game will actually start with
+try { RcControls.get().wide = COHORT.on.wide; } catch { /* controls.js not loaded */ }
+window.RC_WIDE_RUNNING = COHORT.on.wide;   // the display modes this start runs with (touch.js: a switch to wide waits for the next)
+// a run that failed in an experiment leaves it (below): a chosen widescreen is forgotten with it, or it would win again
+const leaveExperiments = (keys) => {
+  try {
+    const off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {};
+    for (const k of keys) off[k] = 1;
+    localStorage.setItem('igi-exp-off', JSON.stringify(off));
+    if (keys.includes('wide') && localStorage.getItem('igi-wide-choice') === '1') localStorage.removeItem('igi-wide-choice');
+  } catch { /* storage blocked */ }
+};
 // one-line telemetry to crash.php (field x = the experiments this browser is in). The per-session events (start,
 // play) come from a quarter of the browsers outside experiments and all inside: crash.php is PHP on shared hosting
 // and serves ~6 requests/s (load test 2026-10-31), which 2,000 players starting games would approach otherwise.
@@ -641,7 +659,8 @@ function setupControls() {
     mouseHost.innerHTML = '<h3>Screen</h3><div class="seg kbd-preset kbd-wide">' +
       `<button type="button" data-wide="1"${s.wide ? ' class="on"' : ''}>Full screen (wide)</button>` +
       `<button type="button" data-wide="0"${!s.wide ? ' class="on"' : ''}>Original 4:3</button></div>` +
-      '<p class="kbd-note">Wide: the 3D view fills a widescreen display with a wider field of view; menus stay 4:3.</p>' +
+      '<p class="kbd-note">Wide: the 3D view fills a widescreen display with a wider field of view; menus stay 4:3.' +
+      (s.wide && !COHORT.on.wide ? ' <b>Starts with the next start of the game: reload the page and press Play.</b>' : '') + '</p>' +
       '<h3>Mouse</h3>' +
       `<div class="row"><span class="label">Left</span>${sel(0)}</div>` +
       `<div class="row"><span class="label">Right</span>${sel(2)}</div>` +
@@ -1248,8 +1267,8 @@ function crashWatch(M, touch) {
     try { sessionStorage.removeItem(RUN_STORE); } catch { /* storage blocked */ }
     // an experiment session that ends (a reload, closing the tab) without ever reaching a mission after 20 s may be
     // a black screen the player gave up on: leave the experiments in this browser (conservative by design)
-    if (COHORT.tag !== 'base' && !runFlags.play && Date.now() - t0 > 20000) {
-      try { const off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {}; for (const k of COHORT.tag.split('+')) off[k] = 1; localStorage.setItem('igi-exp-off', JSON.stringify(off)); } catch { /* storage blocked */ }
+    if (/^(?!base)/.test(COHORT.tag) && !runFlags.play && Date.now() - t0 > 20000) {
+      leaveExperiments(COHORT.tag.split('+'));
       beacon('expoff', { booted: runFlags.booted || 0, played: Math.round((Date.now() - t0) / 1000) });
     }
   });
@@ -1365,8 +1384,8 @@ function crashCheck() {
     x: r.x || '', booted: r.booted || 0, play: r.play || 0,
   };
   // a run in an experiment that never showed the game, or was killed within two minutes: leave the experiments
-  if (r.x && r.x !== 'base' && (!r.booted || (r.fps === 0 && info.played < 120) || info.played < 120)) {
-    try { const off = JSON.parse(localStorage.getItem('igi-exp-off') || '{}') || {}; for (const k of r.x.split('+')) off[k] = 1; localStorage.setItem('igi-exp-off', JSON.stringify(off)); } catch { /* storage blocked */ }
+  if (r.x && !/^base/.test(r.x) && (!r.booted || (r.fps === 0 && info.played < 120) || info.played < 120)) {
+    leaveExperiments(r.x.split('+'));
     info.expoff = 1;
   }
   console.warn('the previous run ended without unloading (the browser killed the page?)', info);

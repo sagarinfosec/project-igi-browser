@@ -68,7 +68,11 @@ const RcControls = (() => {
   }
   function save() { try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* storage blocked */ } }
   const get = () => S;
-  function set(k, v) { S[k] = v; save(); if (k === 'gyro') gyroApply(); if (k === 'wide') wideApply(); }
+  function set(k, v) {
+    S[k] = v; save(); if (k === 'gyro') gyroApply();
+    // the player's own choice of screen: the loader starts the game in widescreen display modes by it (COHORT)
+    if (k === 'wide') { try { localStorage.setItem('igi-wide-choice', v ? '1' : '0'); } catch { /* storage blocked */ } wideApply(); }
+  }
   const wideApply = () => { if (M && M._rc_set_wide) M._rc_set_wide(S.wide ? 1 : 0); };
   function setMouse(button, action) { S.mouse[button] = ACTIONS[action] ? action : 'none'; save(); }
   function reset() { S = { ...DEFAULTS, mouse: { ...DEFAULTS.mouse } }; save(); gyroApply(); wideApply(); }
