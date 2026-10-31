@@ -1103,6 +1103,13 @@ function showNetStatus(M, session) {
 
 async function run(session) {
   const audio = newAudioContext();   // first, while the click that called run() is still a user gesture
+  // Boot report: no frame 8 s after Play sends where the start got to (script / module / frames), the engine's last
+  // lines and any errors, once. Set here, not after the engine loads: on iOS 16 the page never got that far.
+  const boot = { phase: 'start', at: performance.now(), done: false };
+  const bootPhase = (p) => { boot.phase = p; boot.at = performance.now(); keepLog('[boot] ' + p); };
+  if (!session) setTimeout(() => { if (!boot.done) gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu',
+    n: boot.phase + ' ' + Math.round((performance.now() - boot.at) / 1000) + 's',
+    msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); }, 8000);
   const touch = !session && RcTouch.wanted();
   if (touch) RcTouch.goFullscreen($('stage'));   // also needs the gesture
   else if (!session) setupFullscreen.enter?.();   // desktop too: the game fills the screen (Esc kept for its menu; Alt+Enter leaves)
@@ -1118,7 +1125,9 @@ async function run(session) {
   sizeCanvas();
   const script = document.createElement('script');
   script.src = 'build/recomp.js?v=27';
+  bootPhase('script');
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
+  bootPhase('module');
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
     print: (t) => { keepLog(t); console.log(t); },
@@ -1176,9 +1185,7 @@ async function run(session) {
   let due = 0, booted = false, shownFrames = 0, lastPresent = 0, loading = false;
   const launchT = performance.now();
   setTimeout(() => { if (!booted) beacon('noframe', { touch: touch ? 1 : 0, n: shownFrames, t: 120 }); }, 120000);
-  // no frame 12 s after Play: what the engine said last, and any errors (once; the page may be killed before 120 s)
-  setTimeout(() => { if (!booted && !session) gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu', n: shownFrames,
-    msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); }, 12000);
+  bootPhase('frames');
   // Picture check: players reported a black screen after Play with the game running behind it (frames
   // presented, nothing visible). Once the boot cover is off, every 15th presented frame is copied small onto a 2D
   // canvas in the same task as the present (the canvas still holds it then) and its lit pixels counted. A
@@ -1221,7 +1228,7 @@ async function run(session) {
         // then a stray clear-frame, then the real render loop. Counting to a couple dozen frames waits for
         // that render loop so the cover never lifts onto a still-black screen.
         if (booted && !pic.done) picCheck();
-        if (!booted) { shownFrames += n; if (shownFrames >= 24) { booted = true; hideBoot(); runFlags.booted = 1; beacon('start', { touch: touch ? 1 : 0, t: Math.round(performance.now() / 1000) }); } }
+        if (!booted) { shownFrames += n; if (shownFrames >= 24) { booted = true; boot.done = true; hideBoot(); runFlags.booted = 1; beacon('start', { touch: touch ? 1 : 0, t: Math.round(performance.now() / 1000) }); } }
         else if (loading) { loading = false; hideLoading(); }   // frames resumed: level finished loading
       } else if (booted && !loading && !session && lastPresent && t - lastPresent > 2500) {
         // Booted and running, but no frame for 2.5 s: the game is blocked loading a mission/level. Cover the
