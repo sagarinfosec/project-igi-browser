@@ -17,6 +17,22 @@
        layout in the dashboard is a row of four, "4:1" — the default "1:4" is a column of four, which a landing-sized
        box cuts off), all under the landing views on desktop; mobile: 320x50 under the landing views on phones;
        social: the floating social bar (off: it would float over the game). Sizes must match ad.html. -->
+  <script>
+    // Navigation guard: nothing but the player (a link they click, the address bar, back) and the site itself may
+    // take this tab to another site. Ad code runs in frames of this origin (ad.html), so it could set
+    // top.location: a creative sent players to a "lucky draw" scam page on 2026-10-30. Every browser that shows
+    // the ads (credentialless frames, Chromium 110+) has the Navigation API; window.rcLeave lets the site's own
+    // script leave (the "Open in Chrome" link).
+    try {
+      if (window.navigation) navigation.addEventListener('navigate', function (e) {
+        if (e.userInitiated || window.rcLeave || !e.cancelable) return;
+        var to; try { to = new URL(e.destination.url); } catch (x) { return; }
+        if (to.origin === location.origin) return;
+        e.preventDefault();
+        console.warn('blocked a navigation away from the site (ad?):', to.href.slice(0, 80));
+      });
+    } catch (x) { /* no Navigation API */ }
+  </script>
   <script>window.RC_ADS = { side: true, lead: true, box: true, native: false, mobile: true, social: false,
     // ads at natural breaks, never over play: the loading screen, and the pause menu the player opened
     breaks: true,
@@ -655,7 +671,7 @@
           <button id="home-controls" type="button" class="link-btn">Controls &amp; layout</button>
           <a href="#" id="reset" class="link-btn">Use a different game folder</a>
         </div>
-        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 18:48 IST</b> · fixes land often: reload before reporting an old issue</p>
+        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 19:11 IST</b> · fixes land often: reload before reporting an old issue</p>
       </section>
 
       <!-- multiplayer: host or join -->
@@ -811,7 +827,7 @@
 <script src="netplay.js"></script>
 <script src="controls.js?v=12"></script>
 <script src="touch.js?v=15"></script>
-<script src="loader.js?v=48"></script>
+<script src="loader.js?v=49"></script>
 <script>
   // Ads (Adsterra; slots switched on in RC_ADS, the network's tags in ad.html). The page is cross-origin
   // isolated, which blocks third-party ad frames, so each unit loads ad.html inside an <iframe credentialless>:
@@ -827,9 +843,9 @@
       var f = document.createElement('iframe');
       f.credentialless = true;
       f.setAttribute('credentialless', '');
-      // Sandboxed: an ad may open its own tab, never navigate this page (a creative redirected players to a
-      // "lucky draw" scam page within a second of opening the link, seen in two recordings on 2026-10-30).
-      f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms');
+      // Not sandboxed: Adsterra counted impressions in sandboxed frames but paid nothing for them (revenue fell from
+      // $1.74 to $0.03 on the same impressions the first full day after the sandbox, 2026-10-31). The scam
+      // redirect the sandbox stopped (2026-10-30) is stopped by the navigation guard at the top of the page instead.
       f.src = 'ad.html?slot=' + slot;
       f.width = w; f.height = h; f.title = 'Advertisement'; f.scrolling = 'no';
       f.style.cssText = 'width:' + w + 'px;height:' + h + 'px';
@@ -893,7 +909,7 @@
 
     };
     // Natural-break ads (loader.js calls these): one unit in a given box while the loading screen or the pause
-    // menu the player opened is up, removed the moment it goes. Same sandboxed frames as everywhere else.
+    // menu the player opened is up, removed the moment it goes. Same frames as everywhere else.
     var breakEl = null;
     window.RcBreakAd = {
       show: function (parent, slot, x, y) {

@@ -1430,7 +1430,7 @@ async function boot() {
     btn.textContent = android ? 'Open in Chrome' : 'Copy the link';
     btn.classList.remove('hidden');
     btn.onclick = () => {
-      if (android) location.href = 'intent://' + location.host + location.pathname + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end';
+      if (android) window.rcLeave = true, location.href = 'intent://' + location.host + location.pathname + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(location.href) + ';end';
       else { navigator.clipboard?.writeText(location.href).then(() => status('Link copied. Paste it in Safari or Chrome.')).catch(() => status('Copy this address and open it in Safari or Chrome: ' + location.href)); }
     };
     return;
