@@ -443,10 +443,31 @@ const RcTouch = (() => {
 
   // Landscape, fullscreen where the browser allows it (not on iPhone; there, Add to Home Screen gives the
   // most room). Called from the Play tap, which counts as the user gesture both need.
-  function goFullscreen(stage) {
+  // explain: the player tapped the Fullscreen pill. Safari on iPhone has no fullscreen for pages (only for video):
+  // there the pill says how to get it, which is the home-screen app (Share > Add to Home Screen; no Safari bars).
+  function goFullscreen(stage, explain) {
     const fs = stage.requestFullscreen || stage.webkitRequestFullscreen;
-    const p = fs?.call(stage, { navigationUI: 'hide' });
+    if (!fs) { if (explain) fsHelp(stage); return; }
+    const p = fs.call(stage, { navigationUI: 'hide' });
     Promise.resolve(p).then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
+  }
+  function fsHelp(stage) {
+    let h = document.getElementById('fshelp');
+    if (!h) {
+      h = document.createElement('div');
+      h.id = 'fshelp';
+      h.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:40;width:min(92%,420px);' +
+        'padding:16px 18px;border-radius:14px;background:rgba(8,14,10,.94);border:1px solid rgba(255,255,255,.22);color:#fff;' +
+        'font:14px/1.45 system-ui,-apple-system,sans-serif;text-align:left;box-shadow:0 10px 40px rgba(0,0,0,.6)';
+      h.innerHTML = '<b style="font-size:16px">Full screen on iPhone</b><p style="margin:8px 0">Safari on iPhone can’t show web pages ' +
+        'full screen. To play without the Safari bars, add the game to your Home Screen:</p><ol style="margin:0 0 10px;padding-left:20px">' +
+        '<li>Tap the <b>Share</b> button in Safari (the square with an arrow).</li><li>Choose <b>Add to Home Screen</b>.</li>' +
+        '<li>Open the game from the new icon: it fills the whole screen.</li></ol>' +
+        '<p style="margin:0 0 12px;opacity:.8">The home-screen app keeps its own copy of the game, so it downloads once more there.</p>' +
+        '<button type="button" style="width:100%;padding:10px;border:0;border-radius:10px;background:#2ecc71;color:#04150a;font-weight:700;font-size:15px">OK</button>';
+      h.querySelector('button').onclick = () => h.remove();
+      stage.appendChild(h);
+    }
   }
 
   return { wanted, setup, attach, openSettings, openLayout, goFullscreen };

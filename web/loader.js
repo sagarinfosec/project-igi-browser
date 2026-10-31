@@ -1112,7 +1112,8 @@ async function run(session) {
     gpuBeacon('bootlog', { r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu',
       n: why + ' ' + boot.phase + ' ' + Math.round((performance.now() - boot.at) / 1000) + 's',
       msg: recentErr.join(' | ').slice(0, 300), page: recentLog.join(' | ').slice(-300) }); };
-  setTimeout(() => bootReport('8s'), 8000);
+  setTimeout(() => { if (recentErr.length || boot.phase !== 'frames') bootReport('8s'); }, 8000);   // most starts take longer than 8 s
+  setTimeout(() => bootReport('30s'), 30000);
   addEventListener('pagehide', () => bootReport('left'));
   const touch = !session && RcTouch.wanted();
   if (touch) RcTouch.goFullscreen($('stage'));   // also needs the gesture
@@ -1123,7 +1124,7 @@ async function run(session) {
   beacon('launch', { touch: touch ? 1 : 0 });   // Play pressed: against start, the players who never see a frame
   if (touch) {
     // on a phone the game starts fullscreen; if the player later leaves it, #refull gets them back in
-    $('refull').onclick = () => RcTouch.goFullscreen($('stage'));
+    $('refull').onclick = () => RcTouch.goFullscreen($('stage'), true);
   } else { fullscreenTip(); controlsTip(); }
   if (session) await clearNetSaves(session);
   sizeCanvas();
@@ -1629,7 +1630,9 @@ function setupFullscreen() {
   const active = () => document.fullscreenElement || document.webkitFullscreenElement;
   // body.fs drives the touch re-fullscreen pill (index.html): shown only when playing and NOT fullscreen.
   // Registered unconditionally (even where the desktop button is unavailable) so the pill is always right.
-  const syncFsClass = () => document.body.classList.toggle('fs', !!active());
+  // opened from the Home Screen (iPhone, an installed app): already without browser bars, so no pill either
+  const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+  const syncFsClass = () => document.body.classList.toggle('fs', !!active() || standalone());
   document.addEventListener('fullscreenchange', syncFsClass);
   document.addEventListener('webkitfullscreenchange', syncFsClass);
   syncFsClass();
