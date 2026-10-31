@@ -24,7 +24,7 @@ const params = new URLSearchParams(location.search);
 // share, so a change can go to a few percent of players first and its reports (crash.php, field "x") be compared
 // with everyone else's before it goes further. A browser whose run in an experiment ended badly (no frame, or
 // killed within two minutes) leaves that experiment for good (crashCheck). URL switches force either way.
-const EXPERIMENTS = { wide: 50, compact: 0 };   // percent of browsers (wide display modes: 10% 2026-10-30, 50% 2026-10-31)
+const EXPERIMENTS = { wide: 100, compact: 0 };   // percent of browsers (wide display modes: 10% 2026-10-30, 50% then 100% 2026-10-31)
 const COHORT = (() => {
   let b = 99, off = {};
   try {
