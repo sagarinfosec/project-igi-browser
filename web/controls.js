@@ -198,6 +198,7 @@ const RcControls = (() => {
     const a = ACTIONS[name];
     if (!a) return;
     if (a.scope) { if (down) scopeToggle(); return; }
+    if (name === 'menu' && down) { try { window.pauseAds?.menuPressed?.(); } catch { /* no ads */ } }
     // Zoom in / out. The game's zoom keys only work with the scope or binoculars up, and zoom while held: a quick
     // tap moved the view a barely visible amount and + without a scope did nothing, both felt like a missed touch
     // (2026-10-31). Now + without a scope raises it (the scope toggle), a tap steps the zoom 1.6x, a hold zooms on.

@@ -1208,6 +1208,12 @@ static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
 static Chunk *g_q_head, *g_q_tail;
 static int g_q_frames, g_ready;
 static volatile int g_lost, g_recovering, g_lost_count;   /* device-lost recovery (on_web_device_lost) */
+/* Retries back off and give up: a GPU that hangs (DXGI_ERROR_DEVICE_HUNG) can make every new device arrive already
+   lost ("Device creation failed."), and an immediate retry looped ~100 times a second (2026-10-31, one PC, 12,700
+   reports in 10 minutes). Attempts within a minute of each other double the wait (0.5 s .. 8 s); after 6, stop. */
+static int g_attempts, g_gave_up;
+static double g_next_try, g_last_loss;
+static void device_lost(const char *text);
 EMSCRIPTEN_KEEPALIVE int rc_gpu_recover(void);
 static WGPUBuffer g_rb_buf;
 static CmdReadback g_rb_cmd;
@@ -1276,7 +1282,7 @@ static int run_chunk(Chunk *ch) {
    allow_present is set - the page passes 1 from requestAnimationFrame. Returns frames presented. */
 EMSCRIPTEN_KEEPALIVE int rc_gpu_pump(int allow_present) {
     int presented = 0;
-    if (g_lost && !g_recovering && !g_rb_pending) { rc_gpu_recover(); return 0; }
+    if (g_lost && !g_recovering && !g_rb_pending && !g_gave_up && emscripten_get_now() >= g_next_try) { rc_gpu_recover(); return 0; }
     if (!g_ready) return 0;
     g_watch.page_phase = 1;
     while (!g_rb_pending) {
@@ -1311,7 +1317,7 @@ static void on_web_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringVi
     (void)u1; (void)u2;
     if (st != WGPURequestDeviceStatus_Success) {
         fprintf(stderr, "[wgpu] device: %.*s\n", (int)msg.length, msg.data);
-        if (g_lost) { g_recovering = 0; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(); }); }
+        if (g_lost) { g_recovering = 0; g_next_try = emscripten_get_now() + 2000; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(0); }); }
         return;
     }
     g_dev = d;
@@ -1323,6 +1329,7 @@ static void on_web_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringVi
         g_lost = 0; g_recovering = 0; g_lost_count++;
         fprintf(stderr, "[wgpu] device restored (%d)\n", g_lost_count);
         EM_ASM({ if (typeof rcDeviceRestored === 'function') rcDeviceRestored($0); }, g_lost_count);
+        if (getenv("RC_GPU_LOOP")) { fprintf(stderr, "[wgpu] device lost (test loop)\n"); device_lost("Device creation failed. (test)"); return; }
     }
     __atomic_store_n(&g_ready, 1, __ATOMIC_RELEASE);
 }
@@ -1333,15 +1340,31 @@ static void on_web_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringVi
    itself; every texture is sent again from the game's memory (render_rec.c g_gpu_gen). The game waits meanwhile
    (the frame queue stops draining). The page shows "restoring" (rcDeviceLost) and the reload prompt only if
    recovery fails (rcRecoverFailed). The work happens in rc_gpu_pump, never inside a WebGPU callback. */
+static void device_lost(const char *text);
 static void on_web_device_lost(WGPUDevice const *d, WGPUDeviceLostReason reason, WGPUStringView msg, void *u1, void *u2) {
     (void)d; (void)u1; (void)u2;
     if (reason == WGPUDeviceLostReason_Destroyed) return;
     fprintf(stderr, "[wgpu] device lost (%d): %.*s\n", (int)reason, (int)msg.length, msg.data);
     char text[256];
     snprintf(text, sizeof text, "%.*s", (int)(msg.length < 200 ? msg.length : 200), msg.data);
-    g_lost = 1;
+    device_lost(text);
+}
+/* testing: behave as if the device was lost (?gpuloop also makes every new device "arrive lost") */
+EMSCRIPTEN_KEEPALIVE void rc_gpu_test_lose(void) { fprintf(stderr, "[wgpu] device lost (test)\n"); device_lost("test loss"); }
+static void device_lost(const char *text) {
+    double now = emscripten_get_now();
+    g_attempts = now - g_last_loss < 60000 ? g_attempts + 1 : 1;
+    g_last_loss = now;
+    g_next_try = now + 500.0 * (double)(1 << (g_attempts < 5 ? g_attempts - 1 : 4));
+    g_lost = 1; g_recovering = 0;
     __atomic_store_n(&g_ready, 0, __ATOMIC_RELEASE);
-    EM_ASM({ if (typeof rcDeviceLost === 'function') rcDeviceLost(UTF8ToString($0)); }, text);
+    if (g_attempts > 6) {
+        g_gave_up = 1;
+        fprintf(stderr, "[wgpu] device lost %d times in a row: giving up\n", g_attempts);
+        EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(1); });
+        return;
+    }
+    EM_ASM({ if (typeof rcDeviceLost === 'function') rcDeviceLost(UTF8ToString($0), $1); }, text, g_attempts);
 }
 static void forget_ps(Shader *sh) {
     if (!sh->pixel || !sh->backend) return;
@@ -1397,7 +1420,7 @@ static void request_web_adapter(int attempt);
 /* page: try (again) to get a device after a loss; returns 1 while a recovery is under way or done */
 EMSCRIPTEN_KEEPALIVE int rc_gpu_recover(void) {
     if (!g_lost) return 1;
-    if (g_recovering) return 1;
+    if (g_recovering || g_gave_up) return 1;
     g_recovering = 1;
     if (g_dev) drop_device_objects();
     fprintf(stderr, "[wgpu] recovering: requesting a new device\n");
@@ -1413,7 +1436,7 @@ static void on_web_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPUStrin
     if (st != WGPURequestAdapterStatus_Success) {
         fprintf(stderr, "[wgpu] adapter (attempt %d): %.*s\n", attempt, (int)msg.length, msg.data);
         if (attempt < 3) request_web_adapter(attempt + 1);   /* default preference, compatibility mode, then the software fallback */
-        else if (g_lost) { g_recovering = 0; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(); }); }
+        else if (g_lost) { g_recovering = 0; g_next_try = emscripten_get_now() + 2000; EM_ASM({ if (typeof rcRecoverFailed === 'function') rcRecoverFailed(0); }); }
         return;
     }
     if (attempt == 2) { g_compat = 1; fprintf(stderr, "[wgpu] using a WebGPU compatibility-mode adapter (OpenGL ES class)\n"); }

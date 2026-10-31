@@ -17,7 +17,12 @@
        layout in the dashboard is a row of four, "4:1" — the default "1:4" is a column of four, which a landing-sized
        box cuts off), all under the landing views on desktop; mobile: 320x50 under the landing views on phones;
        social: the floating social bar (off: it would float over the game). Sizes must match ad.html. -->
-  <script>window.RC_ADS = { side: true, lead: true, box: true, native: false, mobile: true, social: false };</script>
+  <script>window.RC_ADS = { side: true, lead: true, box: true, native: false, mobile: true, social: false,
+    // ads at natural breaks, never over play: the loading screen, and the pause menu the player opened
+    breaks: true,
+    // Direct Link (Adsterra "Direct Link" / smartlink URL): opened in a NEW tab on the Play click for `percent`
+    // of sessions, at most once every `days` days per browser. Never navigates the game's own tab. Off while url is ''.
+    direct: { url: '', percent: 1, days: 3 } };</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -650,7 +655,7 @@
           <button id="home-controls" type="button" class="link-btn">Controls &amp; layout</button>
           <a href="#" id="reset" class="link-btn">Use a different game folder</a>
         </div>
-        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 04:59 IST</b> · fixes land often: reload before reporting an old issue</p>
+        <p class="home-foot" id="updated">Updated <b>31 Oct 2026, 07:12 IST</b> · fixes land often: reload before reporting an old issue</p>
       </section>
 
       <!-- multiplayer: host or join -->
@@ -804,9 +809,9 @@
   })();
 </script>
 <script src="netplay.js"></script>
-<script src="controls.js?v=10"></script>
+<script src="controls.js?v=11"></script>
 <script src="touch.js?v=14"></script>
-<script src="loader.js?v=39"></script>
+<script src="loader.js?v=40"></script>
 <script>
   // Ads (Adsterra; slots switched on in RC_ADS, the network's tags in ad.html). The page is cross-origin
   // isolated, which blocks third-party ad frames, so each unit loads ad.html inside an <iframe credentialless>:
@@ -887,6 +892,39 @@
       }
 
     };
+    // Natural-break ads (loader.js calls these): one unit in a given box while the loading screen or the pause
+    // menu the player opened is up, removed the moment it goes. Same sandboxed frames as everywhere else.
+    var breakEl = null;
+    window.RcBreakAd = {
+      show: function (parent, slot, x, y) {
+        if (!A.breaks || !parent) return;
+        var sizes = { box: [300, 250], lead: [728, 90], mobile: [320, 50] }, z = sizes[slot];
+        if (!z) return;
+        if (breakEl && breakEl.dataset.slot === slot && breakEl.parentNode === parent) { breakEl.style.left = x + 'px'; breakEl.style.top = y + 'px'; return; }
+        this.hide();
+        breakEl = document.createElement('div');
+        breakEl.className = 'break-ad'; breakEl.dataset.slot = slot;
+        breakEl.style.cssText = 'position:absolute;z-index:7;left:' + x + 'px;top:' + y + 'px;width:' + z[0] + 'px;height:' + z[1] + 'px';
+        breakEl.appendChild(frame(slot, z[0], z[1]));
+        parent.appendChild(breakEl);
+      },
+      hide: function () { if (breakEl) { breakEl.remove(); breakEl = null; } },
+      showing: function () { return !!breakEl; }
+    };
+    // Direct Link: on the Play click (a user gesture), for a small share of sessions, in a new tab
+    (function () {
+      var D = A.direct || {}, play = document.getElementById('play');
+      if (!D.url || !play) return;
+      play.addEventListener('click', function () {
+        try {
+          var last = +localStorage.getItem('igi-dl-at') || 0;
+          if (Date.now() - last < (D.days || 3) * 864e5) return;
+          if (Math.random() * 100 >= (D.percent || 1)) return;
+          localStorage.setItem('igi-dl-at', String(Date.now()));
+          window.open(D.url, '_blank', 'noopener,noreferrer');
+        } catch (e) { /* storage blocked: skip */ }
+      }, true);
+    })();
     // Ads only on the real home view (never on the "can't run" / download / error views) and only until the
     // game starts: then every frame is removed, so no ad code runs behind the game.
     var teardown = function () {

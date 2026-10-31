@@ -103,6 +103,11 @@ function showBoot() {
   phase.textContent = 'Starting the game…';
   b.classList.remove('hidden');
   stopBootTips = startTips(b.querySelector('.tips'));
+  // an ad under the loading text (a natural break: the first launch takes from seconds to minutes)
+  try { const inner = b.querySelector('.boot-inner'); if (window.RcBreakAd && inner) {
+    const phone = RcTouch.wanted(), w = phone ? 320 : 300;
+    inner.style.paddingBottom = phone ? '62px' : '262px';
+    window.RcBreakAd.show(inner, phone ? 'mobile' : 'box', (inner.clientWidth - w) / 2, inner.scrollHeight - (phone ? 56 : 256)); } } catch { /* no ads */ }
   showBoot.t1 = setTimeout(() => { phase.textContent = 'Loading the game into memory…'; }, 12000);
   showBoot.t2 = setTimeout(() => { phase.textContent = 'The first launch is the slow one — almost there…'; }, 45000);
   showBoot.t3 = setTimeout(() => { phase.textContent = 'Still working — a slow phone can take a couple of minutes…'; }, 90000);
@@ -116,7 +121,8 @@ function hideBoot() {
   const b = $('booting');
   for (const k of ['t1', 't2', 't3', 't4']) clearTimeout(showBoot[k]);
   if (stopBootTips) { stopBootTips(); stopBootTips = null; }
-  if (b) { b.classList.add('hidden'); b.onpointerdown = null; }
+  if (b) { b.classList.add('hidden'); b.onpointerdown = null; const inner = b.querySelector('.boot-inner'); if (inner) inner.style.paddingBottom = ''; }
+  try { window.RcBreakAd?.hide(); } catch { /* no ads */ }
 }
 
 // Mid-game loading cover: after boot, the game blocks hard (no frames presented) while it loads a selected
@@ -643,6 +649,33 @@ function subtitles(M, touch) {
   }, 120);
 }
 
+// An ad while the pause menu the PLAYER opened is up (Esc / MENU pressed in play, then the game paused), never in
+// cutscenes or loading (the game reads as paused there too). Placed in the free part of the game's 4:3 picture:
+// right of the menu box when there is room for 300x250, else under it (728x90 or 320x50). Gone on resume.
+function pauseAds(touch) {
+  if (!window.RcBreakAd) return;
+  let escAt = 0, wasPlaying = false, on = false;
+  const markEsc = () => { if (RcControls.inMission() && !RcControls.paused()) { escAt = performance.now(); wasPlaying = true; } };
+  window.addEventListener('keydown', (e) => { if (e.code === 'Escape') markEsc(); }, true);
+  pauseAds.menuPressed = markEsc;   // the touch MENU button (touch.js through RcControls.act('menu'))
+  const canvas = $('canvas'), stage = $('stage');
+  setInterval(() => {
+    const paused = RcControls.paused();
+    if (on && !paused) { on = false; window.RcBreakAd.hide(); return; }
+    if (!on && paused && wasPlaying && performance.now() - escAt < 2000) {
+      wasPlaying = false; on = true;
+      const r = canvas.getBoundingClientRect(), S = stage.getBoundingClientRect();
+      const h = Math.min(r.height, (r.width * 3) / 4), w = (h * 4) / 3;
+      const ox = r.left - S.left + (r.width - w) / 2, oy = r.top - S.top + (r.height - h) / 2;
+      const right = w * (1 - 483 / 640), below = h * (1 - 397 / 480);   // the game's Esc menu box: x 157-483, y 93-397 of 640x480
+      if (!touch && right >= 316) window.RcBreakAd.show(stage, 'box', ox + w * 483 / 640 + (right - 300) / 2, oy + h * 93 / 480);
+      else if (!touch && below >= 96 && w >= 740) window.RcBreakAd.show(stage, 'lead', ox + (w - 728) / 2, oy + h * 397 / 480 + (below - 90) / 2);
+      else if (below >= 54 && w >= 330) window.RcBreakAd.show(stage, 'mobile', ox + (w - 320) / 2, oy + h * 397 / 480 + (below - 50) / 2);
+      else on = false;
+    }
+  }, 300);
+}
+
 function hookInput(M, net) {
   const canvas = $('canvas');
   if (net) {
@@ -843,8 +876,9 @@ function compactMemory() {
 // on a new device (render_wgpu.c rc_gpu_recover) and the game carries on where it was; this shows a short note
 // meanwhile. Only if no new device comes (rcRecoverFailed, or nothing within 20 s while the page is visible) the
 // old prompt to reload appears.
-let gpuLostAt = 0, gpuFailTimer = 0;
+let gpuLostAt = 0, gpuFailTimer = 0, gpuReports = 0;   // reports per page: at most 3 of each (a looping GPU flooded crash.php)
 const gpuBeacon = (type, extra) => {
+  if (++gpuReports > 6) return;
   try {
     navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, x: COHORT.tag, type, ua: navigator.userAgent,
       mem: navigator.deviceMemory || 0, mission: RcControls.inMission() ? 1 : 0, bg: document.hidden ? 1 : 0 }, extra))], { type: 'application/json' }));
@@ -866,9 +900,9 @@ function gpuReloadPrompt(msg) {
   document.body.appendChild(d);
   $('gpulost-reload').onclick = () => location.reload();
 }
-window.rcDeviceLost = (msg) => {
-  gpuLostAt = performance.now();
-  gpuBeacon('gpulost', { msg: String(msg || '').slice(0, 200) });
+window.rcDeviceLost = (msg, n) => {
+  if (!gpuLostAt) gpuLostAt = performance.now();   // the 20 s limit runs from the first loss of a series
+  gpuBeacon('gpulost', { msg: String(msg || '').slice(0, 200), n: n || 1 });
   if (!$('gpurestore')) {
     const n = document.createElement('div');
     n.id = 'gpurestore';
@@ -892,13 +926,12 @@ window.rcDeviceRestored = (n) => {
   $('gpurestore')?.remove();
   gpuBeacon('gpurestored', { dur: ms, n });
 };
-window.rcRecoverFailed = () => {
-  // retry when the page is visible again (Chrome gives no device to a page in the background), else give up
-  if (document.hidden) return;
-  setTimeout(() => { if (gpuLostAt && window.recomp && window.recomp._rc_gpu_recover) window.recomp._rc_gpu_recover(); }, 1500);
+window.rcRecoverFailed = (final) => {
+  // the engine retries on its own (backing off) and gives up after six losses in a row: then the prompt
+  if (final) { clearTimeout(gpuFailTimer); gpuBeacon('gpufail', { final: 1 }); gpuReloadPrompt(''); }
 };
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && gpuLostAt && window.recomp && window.recomp._rc_gpu_recover) { gpuLostAt = performance.now(); window.recomp._rc_gpu_recover(); }
+  if (!document.hidden && gpuLostAt) gpuLostAt = performance.now();   // count the 20 s from the page's return; the engine retries itself
 });
 
 function sizeCanvas() {
@@ -979,7 +1012,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=22';
+  script.src = 'build/recomp.js?v=23';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -992,7 +1025,8 @@ async function run(session) {
       if (params.has('pads')) m.ENV.RC_PADS = params.get('pads');
       if (params.has('input')) m.ENV.RC_INPUT = params.get('input');   // testing: scripted input (host/input.c)
       if (params.has('noyield')) m.ENV.RC_NO_YIELD = '1';
-      if (params.has('gpucompat')) m.ENV.RC_GPU_COMPAT = '1';            // testing: a WebGPU compatibility-mode device               // testing: the game's poll spins unyielded (host/user32.c)
+      if (params.has('gpucompat')) m.ENV.RC_GPU_COMPAT = '1';            // testing: a WebGPU compatibility-mode device
+      if (params.has('gpuloop')) m.ENV.RC_GPU_LOOP = '1';                // testing: every new device after a loss arrives lost               // testing: the game's poll spins unyielded (host/user32.c)
       // Widescreen display modes (host/ddraw7.c) only when asked (?widemodes): the game runs in its original 4:3
       // modes everywhere, as it did until 2026-10-30; black screens on phones and desktops followed the switch.
       if (COHORT.on.wide) m.ENV.RC_WIDE_DISPLAY = '1';   // the wide experiment (A/B, see COHORT)
@@ -1019,6 +1053,7 @@ async function run(session) {
   new ResizeObserver(() => { sizeCanvas(); M._rc_set_canvas_size(canvas.width, canvas.height); }).observe(canvas);
   hookInput(M, !!session);
   subtitles(M, touch);
+  pauseAds(touch);
   if (touch) { RcTouch.attach(M, $('stage'), canvas); followVisualViewport($('stage')); }
   if (session) { session.client.attach(M); showNetStatus(M, session); }
   crashWatch(M, touch);
@@ -1492,7 +1527,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp22.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp23.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;
