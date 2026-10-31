@@ -37,10 +37,27 @@
     social: { w: 320, h: 160, tag: '<script data-cfasync="false" src="https://bauval.org/14/2ee007ecb8fd9c8ab24ec52a03dc2a05"><\/script>' },
   };
   (function () {
-    var slot = SLOTS[new URLSearchParams(location.search).get('slot')];
+    var name = new URLSearchParams(location.search).get('slot'), slot = SLOTS[name];
     if (!slot || !slot.tag) return;
     // document.write keeps the network's own <script> tags executing in order, as on a plain page
-    document.write('<div style="width:' + slot.w + 'px;height:' + slot.h + 'px;overflow:hidden">' + slot.tag + '</div>');
+    document.write('<div id="slotbox" style="width:' + slot.w + 'px;height:' + slot.h + 'px;overflow:hidden">' + slot.tag + '</div>');
+    // Fallback: a banner the network leaves empty (2026-10-31: every banner zone answered "load_watch.empty" while
+    // the native and social-bar zones had ads) gives its box to a format that fills: native cards in the tall
+    // boxes, the social bar's card in the strips. A banner that fills makes its own frame within a second or two.
+    var FALLBACK = { side: 'native', box: 'native', lead: 'social', mobile: 'social' };
+    var fb = FALLBACK[name];
+    if (fb && !/no-fallback/.test(location.search)) setTimeout(function () {
+      var box = document.getElementById('slotbox');
+      if (!box || box.querySelector('iframe, img')) return;   // the banner came
+      box.innerHTML = '';
+      var add = function (src, attrs) { var sc = document.createElement('script'); sc.src = src; sc.async = true;
+        for (var k in attrs) sc.setAttribute(k, attrs[k]); box.appendChild(sc); };
+      if (fb === 'native') {
+        var c = document.createElement('div'); c.id = 'container-3bff0be464311c5f8a8de0c57d5de5b1'; box.appendChild(c);
+        add('https://bauval.org/21/3bff0be464311c5f8a8de0c57d5de5b1', { 'data-cfasync': 'false' });
+      } else add('https://bauval.org/14/2ee007ecb8fd9c8ab24ec52a03dc2a05', { 'data-cfasync': 'false' });
+      try { parent.postMessage({ rcAd: 1, slot: name, at: 'fallback', loader: true, requests: 0, frames: 0, images: 0, text: fb, failed: [], credentialless: '' }, '*'); } catch (e) {}
+    }, 4000);
     // Diagnostics for index.html?adtest: what happened in here (the network's loader fetched? an ad frame made?
     // resources that failed?), posted to the page after a few seconds and again later.
     var failed = [];
