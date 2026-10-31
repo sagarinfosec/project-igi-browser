@@ -46,8 +46,8 @@ const COHORT = (() => {
 // Rates per cohort are unaffected (a browser sends all of its events or none).
 const SAMPLED = COHORT.tag !== 'base' || COHORT.bucket % 4 === 0;
 const beacon = (type, extra) => {
-  if ((type === 'start' || type === 'play') && !SAMPLED && window.RC_RENDERER !== 'gl') return;   // the WebGL players: all of them, to judge the new renderer
-  try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, r: window.RC_RENDERER || 'gpu', ua: navigator.userAgent,
+  if ((type === 'start' || type === 'play' || type === 'launch' || type === 'noframe') && !SAMPLED && window.RC_RENDERER !== 'gl') return;   // the WebGL players: all of them, to judge the new renderer
+  try { navigator.sendBeacon('crash.php', new Blob([JSON.stringify(Object.assign({ v: 21, type, x: COHORT.tag, r: window.RC_RENDERER || window.RC_GPU_KIND || 'gpu', ua: navigator.userAgent,
     mem: navigator.deviceMemory || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` }, extra || {}))], { type: 'application/json' })); } catch { /* no beacon */ }
 };
 const OPFS_DIR = 'rcgame';
@@ -1081,6 +1081,7 @@ async function run(session) {
   $('panel').classList.add('hidden');
   document.body.classList.add('playing');   // enables the touch re-fullscreen pill (index.html)
   showBoot();   // cover the black canvas until the first frame renders (see frame loop below)
+  beacon('launch', { touch: touch ? 1 : 0 });   // Play pressed: against start, the players who never see a frame
   if (touch) {
     // on a phone the game starts fullscreen; if the player later leaves it, #refull gets them back in
     $('refull').onclick = () => RcTouch.goFullscreen($('stage'));
@@ -1088,7 +1089,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=25';
+  script.src = 'build/recomp.js?v=26';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -1144,6 +1145,38 @@ async function run(session) {
   // display would halve both. Solo play follows the display. A frame is due every 1/60 s, with a little
   // tolerance so a 60 Hz display's own jitter doesn't skip one.
   let due = 0, booted = false, shownFrames = 0, lastPresent = 0, loading = false;
+  const launchT = performance.now();
+  setTimeout(() => { if (!booted) beacon('noframe', { touch: touch ? 1 : 0, n: shownFrames, t: 120 }); }, 120000);
+  // Picture check: players reported a black screen after Play with the game running behind it (frames
+  // presented, nothing visible). Once the boot cover is off, every 15th presented frame is copied small onto a 2D
+  // canvas in the same task as the present (the canvas still holds it then) and its lit pixels counted. A
+  // picture that stays black for 20 s on WebGPU switches this browser to WebGL 2 and restarts.
+  const pic = { el: null, cx: null, lit: 0, samples: 0, until: 0, done: false, f: 0 };
+  const picCheck = () => {
+    if (pic.done || ++pic.f % 15) return;
+    try {
+      if (!pic.el) { pic.el = document.createElement('canvas'); pic.el.width = 16; pic.el.height = 12; pic.cx = pic.el.getContext('2d', { willReadFrequently: true }); }
+      pic.cx.clearRect(0, 0, 16, 12);
+      pic.cx.drawImage($('canvas'), 0, 0, 16, 12);
+      const d = pic.cx.getImageData(0, 0, 16, 12).data;
+      let lit = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 24) lit++;
+      pic.samples++; pic.lit = Math.max(pic.lit, lit);
+    } catch (e) { pic.done = true; console.warn('picture check unavailable:', e.message); return; }
+    if (pic.lit >= 4) { pic.done = true; return; }   // a picture: nothing to do
+    if (!pic.until) pic.until = performance.now() + 20000;
+    if (performance.now() < pic.until || session) return;
+    pic.done = true;
+    const r = window.RC_RENDERER || window.RC_GPU_KIND || 'gpu';
+    console.warn(`picture check: ${pic.samples} samples over 20 s, all black (${r})`);
+    gpuBeacon('blackpic', { r, n: pic.samples, t: Math.round((performance.now() - launchT) / 1000) });
+    if (r !== 'gl' && webgl2Ok()) {
+      try { localStorage.setItem(GL_STORE, String(Date.now())); } catch { /* storage blocked: the URL still says so */ }
+      status('Switching to the compatible graphics mode…');
+      const u = new URL(location.href); u.searchParams.set('renderer', 'gl'); u.searchParams.set('autoplay', '1');
+      setTimeout(() => location.replace(u.href), 400);
+    }
+  };
   const frame = (t) => {
     poll(M);
     if (!session || t >= due - 4) {
@@ -1155,6 +1188,7 @@ async function run(session) {
         // on the first frame: while the game loads a cold install it submits nothing for up to ~2 minutes,
         // then a stray clear-frame, then the real render loop. Counting to a couple dozen frames waits for
         // that render loop so the cover never lifts onto a still-black screen.
+        if (booted && !pic.done) picCheck();
         if (!booted) { shownFrames += n; if (shownFrames >= 24) { booted = true; hideBoot(); runFlags.booted = 1; beacon('start', { touch: touch ? 1 : 0, t: Math.round(performance.now() / 1000) }); } }
         else if (loading) { loading = false; hideLoading(); }   // frames resumed: level finished loading
       } else if (booted && !loading && !session && lastPresent && t - lastPresent > 2500) {
@@ -1314,6 +1348,10 @@ function hangWatch(M, touch) {
   setInterval(beat, 1000);
   document.addEventListener('visibilitychange', beat);
 }
+// A browser whose WebGPU picture stayed black (picture check in run()) uses WebGL 2 for 14 days.
+const GL_STORE = 'igi-gl-black';
+const glRemembered = () => { try { const t = +localStorage.getItem(GL_STORE); return t > 0 && Date.now() - t < 14 * 86400000; } catch { return false; } };
+const webgl2Ok = () => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } };
 const runFlags = {};   // this run: booted (24 frames shown), play (the player reached a mission)
 function crashCheck() {
   let r = null;
@@ -1384,8 +1422,9 @@ async function boot() {
     cores: navigator.hardwareConcurrency || 0, screen: `${screen.width}x${screen.height}@${devicePixelRatio}` })], { type: 'application/json' })); } catch { /* no beacon */ } };
   // Renderer: WebGPU when the browser has a usable adapter, else WebGL 2 (render_gl.c), which reaches older iPhones
   // and the Android phones and PCs whose GPU Chrome keeps off WebGPU. ?renderer=gl forces WebGL 2 (testing).
-  const webgl2 = () => { try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; } };
+  const webgl2 = webgl2Ok;
   if (params.get('renderer') === 'gl' && webgl2()) { window.RC_RENDERER = 'gl'; }
+  else if (glRemembered() && !params.has('renderer') && webgl2()) { window.RC_RENDERER = 'gl'; }   // this browser showed black on WebGPU
   else if (!navigator.gpu) {
     cannot('nowebgpu');
     if (webgl2()) window.RC_RENDERER = 'gl';
@@ -1395,11 +1434,13 @@ async function boot() {
   // Remote Desktop / VM): say so instead of starting a game that can only show a black screen
   // (featureLevel 'compatibility': WebGPU on OpenGL ES 3.1, Chrome 146+, for phones without full WebGPU; the engine
   // asks in the same order, host/render_wgpu.c request_web_adapter)
+  // window.RC_GPU_KIND: which request gave the adapter, reported as r (gpu, gpuc = compatibility mode, gpusw = software)
+  const asked = async (opts, kind) => { const a = await navigator.gpu.requestAdapter(opts).catch(() => null); if (a) window.RC_GPU_KIND = kind; return a; };
   const adapter = window.RC_RENDERER === 'gl' ? { gl: 1 } : params.has('noadapter') ? null :   // ?noadapter: testing the fallback
-    await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).catch(() => null) ||
-    await navigator.gpu.requestAdapter().catch(() => null) ||
-    await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' }).catch(() => null) ||
-    await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null);
+    await asked({ powerPreference: 'high-performance' }, 'gpu') ||
+    await asked(undefined, 'gpu') ||
+    await asked({ featureLevel: 'compatibility' }, 'gpuc') ||
+    await asked({ forceFallbackAdapter: true }, 'gpusw');
   if (!adapter && webgl2()) { cannot('nogpu'); window.RC_RENDERER = 'gl'; }
   else if (!adapter) {
     cannot('nogpu');
@@ -1617,7 +1658,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp25.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp26.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

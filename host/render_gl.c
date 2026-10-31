@@ -158,6 +158,10 @@ static GLuint g_prog, g_vao, g_vbo, g_ubo, g_pprog, g_pvao, g_psamp;
 /* field diagnostics (sent once per session through rcGlDiag): the first GL errors and whether frames are black */
 static unsigned g_diag_frames; static int g_diag_err[4], g_diag_errcmd[4], g_diag_nerr, g_diag_sent;
 static char g_diag_log[200];
+/* the same once more inside a mission (the first report sees the main menu): players reported a black screen
+   once the game starts, with the menu fine */
+extern int g_in_mission, g_paused, g_map;
+static unsigned g_mdiag_frames; static int g_mdiag_err[4], g_mdiag_nerr, g_mdiag_sent; static double g_mdiag_t0;
 static GLint g_ubo_align = 256;
 static uint32_t g_vpos, g_upos;
 #define LVBUF_SIZE (16u << 20)
@@ -724,12 +728,40 @@ static void gl_diag_frame(void) {
     EM_ASM({ if (typeof rcGlDiag === 'function') rcGlDiag(UTF8ToString($0)); }, json);
 }
 
+static void gl_mission_diag(void) {
+    if (g_mdiag_sent || !g_diag_sent || !g_in_mission || g_paused || g_map) return;
+    GLenum e = glGetError();   /* sticky: whatever a command of this frame raised */
+    if (e != GL_NO_ERROR) { if (g_mdiag_nerr < 4) g_mdiag_err[g_mdiag_nerr] = (int)e; g_mdiag_nerr++; }
+    if (++g_mdiag_frames == 30) g_mdiag_t0 = emscripten_get_now();
+    if (g_mdiag_frames < 330) return;
+    g_mdiag_sent = 1;
+    double fps = 300.0 * 1000.0 / (emscripten_get_now() - g_mdiag_t0);
+    bind_fbo(g_bb_fbo);
+    uint8_t px[32 * 32 * 4];
+    glReadPixels(g_bb_w / 2 - 16, g_bb_h / 2 - 16, 32, 32, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    unsigned sum = 0, maxv = 0;
+    for (int i = 0; i < 32 * 32; i++) { unsigned v = px[4 * i] + px[4 * i + 1] + px[4 * i + 2]; sum += v; if (v > maxv) maxv = v; }
+    /* a 9x9 grid over the whole picture: how much of it isn't black (HUD alone lights only a few points) */
+    int lit = 0;
+    for (int gy = 1; gy <= 9; gy++) for (int gx = 1; gx <= 9; gx++) {
+        uint8_t q[4];
+        glReadPixels(g_bb_w * gx / 10, g_bb_h * gy / 10, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, q);
+        if (q[0] + q[1] + q[2] > 24) lit++;
+    }
+    char json[256];
+    snprintf(json, sizeof json, "{\"ph\":\"m\",\"avg\":%u,\"max\":%u,\"lit\":%d,\"fps\":%.1f,\"errs\":\"%x %x %x\",\"n\":%d,\"bc\":%d,\"win\":\"%dx%d\"}",
+             sum / (32 * 32), maxv, lit, fps, g_mdiag_err[0], g_mdiag_err[1], g_mdiag_err[2], g_mdiag_nerr, g_gpu_bc, g_bb_w, g_bb_h);
+    fprintf(stderr, "[gl] mission diag %s\n", json);
+    EM_ASM({ if (typeof rcGlDiag === 'function') rcGlDiag(UTF8ToString($0)); }, json);
+}
+
 static void gl_present(const CmdPresent *c) {
     (void)c;
     begin_frame_gl();
     use_backbuffer_gl();
     g_frame_open_gl = 0;
     gl_diag_frame();
+    gl_mission_diag();
     /* the back buffer (rows top first) onto the canvas: one textured triangle, flipped (see PVS) */
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     g_cur_fbo = 0;
