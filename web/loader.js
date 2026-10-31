@@ -1108,7 +1108,7 @@ async function run(session) {
   if (session) await clearNetSaves(session);
   sizeCanvas();
   const script = document.createElement('script');
-  script.src = 'build/recomp.js?v=26';
+  script.src = 'build/recomp.js?v=27';
   await new Promise((ok, fail) => { script.onload = ok; script.onerror = fail; document.head.appendChild(script); });
   const M = await createRecomp({
     arguments: ['/opfs/' + OPFS_DIR],
@@ -1132,6 +1132,7 @@ async function run(session) {
       if (params.has('poke')) m.ENV.RC_POKE = params.get('poke');      // testing: memory pokes (host/input.c)
       if (params.has('queue')) m.ENV.RC_QUEUE = params.get('queue');
       if (params.has('gpuskip')) m.ENV.RC_GPU_SKIP = '1';   // diagnostics: the executor issues no draws
+      if (params.has('env')) for (const kv of params.get('env').split(';')) { const i = kv.indexOf('='); if (/^RC_[A-Z_]+$/.test(kv.slice(0, i))) m.ENV[kv.slice(0, i)] = kv.slice(i + 1); }   // testing: engine switches
       if (session) Object.assign(m.ENV, RcNetplay.gameEnv(session), { RC_USERDATA: '/opfs/' + netSaves(session) });
       m.ENV.RC_LOG_FPS = params.has('fps') ? '1' : '';
       if (!params.has('fps')) delete m.ENV.RC_LOG_FPS;
@@ -1677,7 +1678,7 @@ function controlsTip() {
 async function buildVersion() {
   // peers must run the same build and game files, or their simulations diverge
   const marker = await readMarker();
-  const wasm = await fetch('build/recomp26.wasm', { method: 'HEAD' }).catch(() => null);
+  const wasm = await fetch('build/recomp27.wasm', { method: 'HEAD' }).catch(() => null);
   // the ETag comes back weak (W/"...") when the response is compressed: compare only its value
   const etag = (wasm?.headers.get('ETag') || '').replace(/^W\//, '').replace(/"/g, '');
   return `${marker?.version || 'local'}:${etag || wasm?.headers.get('Content-Length') || '?'}`;

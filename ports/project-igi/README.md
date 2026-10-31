@@ -95,8 +95,9 @@ play, constant in pause, different between, same in both missions") found the ga
 (`PROFILE_PAUSE_FLAG`: 9 with control, 0 in the Esc menu, cutscenes and when dead); it can stay 0 after a resume,
 so paused = flag 0 AND timer still. `RC_TICK_LOG=1` prints the detector's inputs every 60 frames.
 
-Map computer (2026-10-31): 0x543c58 (`PROFILE_MAP_FLAG`) is 1 in play and 0 while the map is open (Esc leaves it
-1); with the map open the host stops treating the mouse as look (`g_map`: no Y inversion, no look scaling, the
+Map computer (2026-10-31): 0xa5ec60 (`PROFILE_MAP_OPEN`) is 2 while the map is open and 1 otherwise, at every
+Graphics detail level and with the scope or binoculars up (the first choice, 0x543c58, stays 0 at the lowest detail, so those players got no mouse look,
+scope or zoom); with the map open the host stops treating the mouse as look (`g_map`: no Y inversion, no look scaling, the
 page sees "not in a mission"), which had made the map cursor feel inverted.
 
 Subtitles (2026-10-31): the game draws speech in a 3-11 px bitmap font. Every glyph is a pre-transformed quad whose

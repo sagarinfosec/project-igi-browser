@@ -114,7 +114,7 @@ static int g_world_this_frame;
 /* Paused: the game's clock (PROFILE_TICK) has not moved for a few frames while a world is being drawn: the
    Esc menu is up over the frozen world, and the mouse drives its cursor, not the view. */
 int g_paused;
-int g_map;   /* the map computer is open over a mission: the mouse drives its cursor, not the view (PROFILE_MAP_FLAG) */
+int g_map;   /* the map computer is open over a mission: the mouse drives its cursor, not the view (PROFILE_MAP_OPEN) */
 static uint32_t g_tick_last; static int g_tick_still;
 /* The zoom: the projection the world is drawn with. m11 (y scale = 1 / tan(fov_y / 2)) grows as the sniper
    scope or the binoculars zoom in. Latched per frame like g_in_mission; the page's scope toggle reads it
@@ -753,8 +753,8 @@ static void rec_present_impl(Device *d) {
     { uint32_t t = R32(PROFILE_TICK);
       g_tick_still = (t == g_tick_last) ? g_tick_still + 1 : 0;
       g_tick_last = t;
-#ifdef PROFILE_MAP_FLAG
-      g_map = g_in_mission && R32(PROFILE_MAP_FLAG) == 0;
+#ifdef PROFILE_MAP_OPEN
+      g_map = g_in_mission && R32(PROFILE_MAP_OPEN) == 2;
 #endif
 #ifdef PROFILE_PAUSE_FLAG
       /* the game's running state (profile.h): 0 in the Esc menu and cutscenes, never in play */

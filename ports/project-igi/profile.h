@@ -23,9 +23,12 @@
 #define PROFILE_TICK       0x00a44398u   /* the level timer: stands still in the Esc menu, but never runs in the last mission */
 /* the game's control flag (found 2026-10-30 by diffing snapshots taken
    playing and paused in missions 1 and 14; preferred over the timer, which the last mission never starts) */
-/* 1 while the player looks through his own eyes, 0 while the map computer is open (found the same way: snapshots
-   with the map closed, open, closed again, in missions 1 and 14; it stays 1 in the Esc menu) */
-#define PROFILE_MAP_FLAG   0x00543c58u
+/* 2 while the map computer is open, 1 otherwise in a mission (snapshots 2026-10-31 at the highest and the lowest
+   Graphics detail, in missions 1, 4 and 14: map closed, open, closed, the Esc menu, the binoculars zoomed in, the
+   sniper rifle's scope up and down). Replaces 0x543c58 (1 = through the player's eyes), which stays 0 at the lowest
+   Graphics detail: the host then took every mission for an open map, and mouse look, the scope and zoom did
+   nothing for those players. (0x684260 looked right too but is scratch memory: it changes with the rifle scope.) */
+#define PROFILE_MAP_OPEN   0x00a5ec60u
 /* the game's running state, next to the level timer: 2 or more while a mission runs (it counts up while the player
    moves), 0 in the Esc menu, on loading screens and in cutscenes. Found 2026-10-31 by snapshots across two
    pause/resume cycles in missions 1 and 14; replaces 0x5468cc, which also drops to 0 in normal play (mission 1
